@@ -669,64 +669,211 @@ describe("itinerary conflict and history", () => {
     await seedOpenTrip();
   });
 
-  it("keeps the newest corrected clientSavedAt and rejects non-members", async () => {
-    const dayPath = `trips/${tripId}/itinerary/2030-01-02`;
+  function emptyPrior(dayId: string, recordedBy: string) {
+    return {
+      dayId,
+      snapshot: { stops: [], backupStops: [], clientSavedAt: null, updatedBy: null },
+      clientSavedAt: null,
+      updatedBy: null,
+      recordedBy,
+      outcome: "superseded" as const,
+      createdAt: serverTimestamp(),
+    };
+  }
+
+  function priorFrom(
+    dayId: string,
+    recordedBy: string,
+    previous: { stops: unknown[]; backupStops: unknown[]; clientSavedAt: Timestamp; updatedBy: string },
+  ) {
+    return {
+      dayId,
+      snapshot: {
+        stops: previous.stops,
+        backupStops: previous.backupStops,
+        clientSavedAt: previous.clientSavedAt,
+        updatedBy: previous.updatedBy,
+      },
+      clientSavedAt: previous.clientSavedAt,
+      updatedBy: previous.updatedBy,
+      recordedBy,
+      outcome: "superseded" as const,
+      createdAt: serverTimestamp(),
+    };
+  }
+
+  function commitDay(
+    uid: string,
+    dayId: string,
+    body: Record<string, unknown>,
+    writeId: string,
+    history: Record<string, unknown>,
+  ) {
+    const userDb = db(uid);
+    const batch = writeBatch(userDb);
+    batch.set(doc(userDb, `trips/${tripId}/itinerary/${dayId}`), { ...body, writeId });
+    batch.set(doc(userDb, `trips/${tripId}/itineraryHistory/${dayId}_${writeId}`), history);
+    return batch.commit();
+  }
+
+  it("requires a same-batch history of the previous version", async () => {
+    const dayId = "2030-01-02";
+    const dayPath = `trips/${tripId}/itinerary/${dayId}`;
     const firstSaved = Timestamp.fromDate(new Date(Date.now() - 60_000));
     const stops = [{ place_id: "ChIJkyoto", name: "清水寺", order: 0 }];
-    const day = (clientSavedAt: Timestamp, updatedBy: string, nextStops = stops) => ({
-      date: "2030-01-02",
+    const day = (
+      clientSavedAt: Timestamp,
+      updatedBy: string,
+      nextStops: unknown[] = stops,
+      backupStops: unknown[] = [],
+    ) => ({
+      date: dayId,
       stops: nextStops,
-      backupStops: [],
+      backupStops,
       clientSavedAt,
       updatedBy,
       updatedAt: serverTimestamp(),
     });
-    await assertFails(setDoc(doc(db(outsider), dayPath), day(firstSaved, member)));
-    await assertSucceeds(setDoc(doc(db(member), dayPath), day(firstSaved, member)));
-    await assertSucceeds(setDoc(doc(db(member), dayPath), day(firstSaved, member)));
-    await assertFails(
-      setDoc(doc(db(leader), dayPath), day(Timestamp.fromDate(new Date(Date.now() - 86_400_000)), leader)),
-    );
+    const previous = {
+      stops,
+      backupStops: [] as unknown[],
+      clientSavedAt: firstSaved,
+      updatedBy: member,
+    };
+
+    await assertFails(setDoc(doc(db(outsider), dayPath), { ...day(firstSaved, member), writeId: "outsider1" }));
+    await assertFails(setDoc(doc(db(member), dayPath), { ...day(firstSaved, member), writeId: "solo0001" }));
+    const memberDb = db(member);
+    const mismatch = writeBatch(memberDb);
+    mismatch.set(doc(memberDb, dayPath), { ...day(firstSaved, member), writeId: "mismatch" });
+    mismatch.set(doc(memberDb, `trips/${tripId}/itineraryHistory/${dayId}_otherid1`), emptyPrior(dayId, member));
+    await assertFails(mismatch.commit());
+
+    await assertSucceeds(commitDay(member, dayId, day(firstSaved, member), "create001", emptyPrior(dayId, member)));
     await assertSucceeds(
-      setDoc(doc(db(leader), dayPath), day(Timestamp.fromDate(new Date(Date.now() - 5_000)), leader, [])),
-    );
-    await assertFails(
-      setDoc(doc(db(leader), `trips/${tripId}/itinerary/2030-01-03`), {
-        ...day(Timestamp.fromDate(new Date(Date.now() + 60 * 60 * 1000)), leader),
-        date: "2030-01-03",
-      }),
+      commitDay(member, dayId, day(firstSaved, member), "resend01", priorFrom(dayId, member, previous)),
     );
 
-    const history = `trips/${tripId}/itineraryHistory/h1`;
+    const older = Timestamp.fromDate(new Date(Date.now() - 86_400_000));
+    await assertFails(commitDay(leader, dayId, day(older, leader), "older001", priorFrom(dayId, leader, previous)));
+
+    const newer = Timestamp.fromDate(new Date(Date.now() - 5_000));
+    await assertSucceeds(commitDay(leader, dayId, day(newer, leader, []), "newer001", priorFrom(dayId, leader, previous)));
+    await assertFails(commitDay(leader, dayId, day(newer, leader, []), "badsnap1", emptyPrior(dayId, leader)));
+
+    await assertFails(
+      commitDay(
+        leader,
+        "2030-01-03",
+        {
+          date: "2030-01-03",
+          stops: [],
+          backupStops: [],
+          clientSavedAt: Timestamp.fromDate(new Date(Date.now() + 60 * 60 * 1000)),
+          updatedBy: leader,
+          updatedAt: serverTimestamp(),
+        },
+        "future01",
+        emptyPrior("2030-01-03", leader),
+      ),
+    );
+
+    const lostPath = `trips/${tripId}/itineraryHistory/lost0001`;
     await assertSucceeds(
-      setDoc(doc(db(leader), history), {
-        dayId: "2030-01-02",
-        snapshot: { stops, clientSavedAt: firstSaved },
-        clientSavedAt: firstSaved,
-        updatedBy: member,
+      setDoc(doc(db(leader), lostPath), {
+        dayId,
+        snapshot: { stops, backupStops: [], clientSavedAt: older, updatedBy: leader },
+        clientSavedAt: older,
+        updatedBy: leader,
         recordedBy: leader,
-        outcome: "superseded",
+        outcome: "lost",
         createdAt: serverTimestamp(),
       }),
     );
-    await assertFails(updateDoc(doc(db(leader), history), { outcome: "lost" }));
-    await assertFails(getDoc(doc(db(outsider), history)));
-    await assertSucceeds(getDoc(doc(db(member), history)));
+    await assertFails(
+      updateDoc(doc(db(leader), `trips/${tripId}/itineraryHistory/${dayId}_newer001`), { outcome: "lost" }),
+    );
+    await assertFails(getDoc(doc(db(outsider), `trips/${tripId}/itineraryHistory/${dayId}_create001`)));
+    await assertSucceeds(getDoc(doc(db(member), `trips/${tripId}/itineraryHistory/${dayId}_create001`)));
+    await assertFails(
+      setDoc(doc(db(leader), `trips/${tripId}/itineraryHistory/${dayId}_orphan01`), emptyPrior(dayId, leader)),
+    );
+  });
+
+  it("allows a shorter backupStops when the previous list is in the same batch", async () => {
+    const dayId = "2030-01-06";
+    const saved = Timestamp.fromDate(new Date(Date.now() - 20_000));
+    const backups = [
+      { place_id: "a", name: "備選甲", order: 0 },
+      { place_id: "b", name: "備選乙", order: 1 },
+    ];
+    const stops = [{ place_id: "c", name: "清水寺", order: 0 }];
+    await assertSucceeds(
+      commitDay(
+        member,
+        dayId,
+        {
+          date: dayId,
+          stops,
+          backupStops: backups,
+          clientSavedAt: saved,
+          updatedBy: member,
+          updatedAt: serverTimestamp(),
+        },
+        "back0001",
+        emptyPrior(dayId, member),
+      ),
+    );
+    const later = Timestamp.fromDate(new Date(Date.now() - 5_000));
+    await assertFails(
+      setDoc(doc(db(member), `trips/${tripId}/itinerary/${dayId}`), {
+        date: dayId,
+        stops,
+        backupStops: [],
+        clientSavedAt: later,
+        updatedBy: member,
+        updatedAt: serverTimestamp(),
+        writeId: "back0002",
+      }),
+    );
+    await assertSucceeds(
+      commitDay(
+        member,
+        dayId,
+        {
+          date: dayId,
+          stops,
+          backupStops: [],
+          clientSavedAt: later,
+          updatedBy: member,
+          updatedAt: serverTimestamp(),
+        },
+        "back0002",
+        priorFrom(dayId, member, { stops, backupStops: backups, clientSavedAt: saved, updatedBy: member }),
+      ),
+    );
+    const savedDay = await assertSucceeds(getDoc(doc(db(member), `trips/${tripId}/itinerary/${dayId}`)));
+    assert.equal(savedDay.get("backupStops").length, 0);
+    const history = await assertSucceeds(
+      getDoc(doc(db(member), `trips/${tripId}/itineraryHistory/${dayId}_back0002`)),
+    );
+    assert.equal(history.get("snapshot").backupStops.length, 2);
   });
 
   it("caps a day at 5 stops", async () => {
+    const dayId = "2030-01-04";
     const stops = (count: number) =>
       Array.from({ length: count }, (_, order) => ({ place_id: `p${order}`, name: "景點", order }));
     const base = (count: number) => ({
-      date: "2030-01-04",
+      date: dayId,
       stops: stops(count),
       backupStops: [],
       clientSavedAt: Timestamp.fromDate(new Date(Date.now() - 5_000)),
       updatedBy: member,
       updatedAt: serverTimestamp(),
     });
-    await assertFails(setDoc(doc(db(member), `trips/${tripId}/itinerary/2030-01-04`), base(6)));
-    await assertSucceeds(setDoc(doc(db(member), `trips/${tripId}/itinerary/2030-01-04`), base(5)));
+    await assertFails(commitDay(member, dayId, base(6), "stops006", emptyPrior(dayId, member)));
+    await assertSucceeds(commitDay(member, dayId, base(5), "stops005", emptyPrior(dayId, member)));
   });
 });
 
