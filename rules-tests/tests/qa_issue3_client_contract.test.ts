@@ -11,6 +11,7 @@ import {
 } from "@firebase/rules-unit-testing";
 import {
   doc,
+  getDoc,
   setDoc,
   serverTimestamp,
   Timestamp,
@@ -207,6 +208,18 @@ describe("qa #3 gaps against merged rules", () => {
         joinedAt: serverTimestamp(),
       }),
     );
+  });
+
+  it("lets the owner write clockProbes/{uid}.t with serverTimestamp and blocks another user", async () => {
+    const owner = "clock-owner";
+    const other = "clock-other";
+    const path = `clockProbes/${owner}`;
+    await assertSucceeds(setDoc(doc(db(owner), path), { t: serverTimestamp() }));
+    const saved = await assertSucceeds(getDoc(doc(db(owner), path)));
+    assert.equal(saved.get("t") instanceof Timestamp, true);
+    assert.deepEqual(Object.keys(saved.data() ?? {}), ["t"]);
+    await assertFails(setDoc(doc(db(other), path), { t: serverTimestamp() }));
+    await assertFails(getDoc(doc(db(other), path)));
   });
 
   it("rejects the Flutter client's trip, user, and inviteCodes payload", async () => {
