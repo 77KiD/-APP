@@ -1,6 +1,6 @@
 # 第一版測試計畫（Test Plan V1）
 
-對應規格：#1；票：#3–#12、#14、#15、#21。原則：只測外部行為，驗收條件都要能實際驗證（見 #1「測試決策」）。
+對應規格：#1；票：#3–#12、#14、#15、#21、#25。原則：只測外部行為，驗收條件都要能實際驗證（見 #1「測試決策」）。
 
 ## 1. 測試層級與接縫
 
@@ -302,6 +302,25 @@
 | T21-71 | functions | 規劃期該成員是隱身；其他成員不是 | 把伺服器時間調到旅程開始並執行排程 | 該成員變為自動；本人收到推播「旅程已開始，隱身已關閉」；其他人不會因此被改狀態，也不收到這則推播 |
 | T21-72 | client | 同 T21-71，但本人當時離線，本機仍留著隱身 | 旅程開始的排程已跑完，本人再恢復連線 | 以伺服器的自動為準，本機殘留的隱身不會寫回；其他人不會看到隱身；本人收到「旅程已開始，隱身已關閉」 |
 | T21-73 | functions | 該成員在開始時被從隱身改成自動，之後沒有再改狀態 | 旅程結束 | 狀態仍是自動，不會自己變回隱身 |
+
+### #25 行程寫入：備選清單與修改紀錄
+客戶端只寫 `trips/{tripId}/itinerary/{dayId}`，而且只送有變動的欄位，不可把沒改到的 `backupStops` 清成空陣列。`itineraryHistory` 只由 `onDocumentWritten` Cloud Function 寫；成員可讀，客戶端建立、更新、刪除都拒絕。較新的 `clientSavedAt` 勝出。被正常換掉的上一版記 `superseded`。比較晚上傳、但 `clientSavedAt` 較早的那筆記 `lost`，伺服器把較新版本寫回並標 `serverRestored`。規則層不拒絕較早的 `clientSavedAt`（這個做法已放棄）。還原寫入與同一個 event 的重送都不得再添一筆歷史。
+
+| ID | 層級 | 前置 | 步驟 | 預期 |
+|---|---|---|---|---|
+| T25-1 | client | 該天已有 stops，且 backupStops 不是空的 | 只改 stops，寫入 `itinerary/{dayId}` | 寫入只含變動欄位；backupStops 與寫入前相同，沒有被清空 |
+| T25-2 | rules | 成員已登入 | 客戶端建立、更新、刪除 `itineraryHistory` | 三項都拒絕 |
+| T25-3 | rules | 已有一筆修改紀錄 | 成員與非成員分別讀取 | 成員可讀；非成員拒絕 |
+| T25-4 | rules | 行程上已有較新的 clientSavedAt | 客戶端再寫入較早的 clientSavedAt | 規則接受，不在規則層拒絕，Function 才看得到這次寫入 |
+| T25-5 | functions | A、B 離線改同一天。A 的 clientSavedAt 較早，B 較晚，而且 B 的 backupStops 有資料 | A 先上傳，B 再上傳 | 行程留下 B，含 B 的 backupStops；A 的版本在歷史，outcome 為 `superseded` |
+| T25-6 | functions | 行程已是較新的 clientSavedAt，且 backupStops 有資料 | 之後才上傳較早儲存、backupStops 為空的版本 | 該筆記為 `lost`；行程被寫回較新版本（含原來的 backupStops），並一度標上 `serverRestored`。這次還原不再產生第二筆歷史 |
+| T25-7 | functions | 帶 `serverRestored: true` 的寫入 | Function 處理這次寫入 | 不新增歷史，只清掉 `serverRestored`。清掉標記的那次寫入也不新增歷史，沒有迴圈 |
+| T25-8 | functions | 同一個 Cloud Event 會被送兩次，event.id 相同 | 模擬同一 event 重送，含還原那一次 | 歷史文件 id 是 event.id（`/` 換成 `_`）；重送後仍然只有一筆，沒有重複 |
+| T25-9 | functions | 其他成員正監聽該天 | 寫入較早的 clientSavedAt，等 Function 還原 | 記錄監聽是否在還原前短暫看到較舊版本。還原結束後必須回到較新版本，不能停在舊的 |
+| T25-10 | functions | 兩筆 clientSavedAt 相同、stops 不同 | 先寫入甲，再寫入乙 | 後送到的乙留下；甲記成 `superseded`，不是 `lost` |
+| T25-11 | client | 畫面上已是較新的 clientSavedAt | 監聽收到較早的 clientSavedAt | 畫面維持較新版本，直到還原寫入到達才換成還原後的內容 |
+| T25-12 | client | 同 T25-11，但 Function 失敗，還原一直沒來 | 等待 | 不能一直停住。逾時後改顯示伺服器現況，並標明還原沒有完成。本測試以 5 秒為上限 |
+| T25-13 | client | 歷史裡最新一筆 outcome 為 `lost` 的 recordedBy 是 A；B 是其他成員。另有一筆 `superseded` 屬於 C | A、B、C 都打開該天 | 只有 A 看到「你的離線修改比較舊」；B 與 C 看不到 |
 
 ## 3. 隱私與權限必測（跨票）
 - 非成員讀不到旅程、投票、位置（#3、#10）。
