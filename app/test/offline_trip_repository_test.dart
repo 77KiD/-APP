@@ -559,10 +559,15 @@ void main() {
     expect(world.database.invites[issued.code]!.expiresAt, issued.expiresAt);
 
     await memberRepo.setPublicInvite(tripId: trip.id, enabled: true);
-    final restored = await world
-        .repositoryFor(person('restored', '恢復'))
-        .joinWithInviteCode(issued.code);
-    expect(restored.memberIds, contains('restored'));
+    final reopened = await world.trips.getTrip(trip.id);
+    expect(reopened.publicInvite, isTrue);
+    expect(reopened.invitesResetAt, isNotNull);
+    await expectLater(
+      world
+          .repositoryFor(person('restored', '恢復'))
+          .joinWithInviteCode(issued.code),
+      throwsA(isA<InviteClosedException>()),
+    );
     expect(world.database.invites[issued.code]!.expiresAt, issued.expiresAt);
 
     await memberRepo.setPublicInvite(tripId: trip.id, enabled: false);

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:group_trip/core/ids/id_generator.dart';
 import 'package:group_trip/core/persistence/json_document_store.dart';
+import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/features/auth/domain/auth_models.dart';
 import 'package:group_trip/features/auth/domain/sign_up_flow.dart';
 
@@ -69,9 +70,7 @@ class LocalAuthRepository implements AuthRepository {
     await store.transaction((draft) {
       final users = _users(draft);
       users[account.id] = {
-        ...account.toPublicMap(),
-        'id': account.id,
-        'email': account.email,
+        ...account.toDeviceMap(),
         'passwordSalt': salt,
         'passwordHash': _hash(password: request.password, salt: salt),
       };
@@ -131,7 +130,7 @@ class LocalAuthRepository implements AuthRepository {
       final record = current is Map
           ? Map<String, dynamic>.from(current)
           : <String, dynamic>{};
-      record.addAll(updated.toPublicMap());
+      record.addAll(updated.toDeviceMap());
       users[account.id] = record;
       draft['users'] = users;
     });
@@ -152,7 +151,7 @@ class LocalAuthRepository implements AuthRepository {
   Map<String, dynamic>? _findRecord(Map<String, dynamic> data, String email) {
     final users = _users(data);
     for (final raw in users.values) {
-      if (raw is Map && raw['email'] == email) {
+      if (raw is Map && raw[LocalOnlyFields.email] == email) {
         return Map<String, dynamic>.from(raw);
       }
     }
@@ -166,19 +165,20 @@ class LocalAuthRepository implements AuthRepository {
   }
 
   UserAccount? _accountFromRecord(Map<String, dynamic> record) {
-    final id = record['id'];
-    final email = record['email'];
-    final birthday = record['birthday'];
+    final id = record[LocalOnlyFields.documentId];
+    final email = record[LocalOnlyFields.email];
+    final birthday =
+        record[LocalOnlyFields.birthday] ?? record[FirestoreSchema.birthdate];
     if (id is! String || email is! String || birthday is! String) return null;
     return UserAccount(
       id: id,
       email: email,
-      displayName: '${record['displayName'] ?? ''}',
+      displayName: '${record[FirestoreSchema.displayName] ?? ''}',
       birthday: birthday,
-      photoUrl: record['photoUrl'] as String?,
-      consentDecided: record['consentDecided'] == true,
-      analyticsConsent: record['analyticsConsent'] == true,
-      crashlyticsConsent: record['crashlyticsConsent'] == true,
+      photoUrl: record[FirestoreSchema.photoUrl] as String?,
+      consentDecided: record[LocalOnlyFields.consentDecided] == true,
+      analyticsConsent: record[LocalOnlyFields.analyticsConsent] == true,
+      crashlyticsConsent: record[LocalOnlyFields.crashlyticsConsent] == true,
     );
   }
 

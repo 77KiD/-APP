@@ -66,11 +66,12 @@ class OfflineTripRepository implements TripRepository {
     await local.saveMember(member);
     await local.saveInvite(
       _issued(
-        trip.inviteCode,
-        trip.id,
-        account.id,
-        MemberRole.captain,
-        now,
+        code: trip.inviteCode,
+        tripId: trip.id,
+        tripTitle: trip.title,
+        createdBy: account.id,
+        issuerRole: MemberRole.captain,
+        createdAt: now,
       ),
     );
     await local.enqueue(SyncOp(type: SyncOpType.upsertTrip, tripId: trip.id));
@@ -450,11 +451,12 @@ class OfflineTripRepository implements TripRepository {
     }
     final now = await _stamp();
     final invite = _issued(
-      await _freshCode(),
-      trip.id,
-      account.id,
-      self.role,
-      now,
+      code: await _freshCode(),
+      tripId: trip.id,
+      tripTitle: trip.title,
+      createdBy: account.id,
+      issuerRole: self.role,
+      createdAt: now,
     );
     await local.saveInvite(invite);
     await local.enqueue(
@@ -480,7 +482,23 @@ class OfflineTripRepository implements TripRepository {
     }
     if (trip.publicInvite == enabled) return trip;
     final now = await _stamp();
-    final updated = trip.copy(publicInvite: enabled, updatedAt: now);
+    final DateTime? resetAt;
+    if (!enabled) {
+      final server = connectivity.isOnline ? await remote.serverNow() : now;
+      // 測試時鐘常常凍在邀請碼的 createdAt。規則是 createdAt >= invitesResetAt
+      // 仍算有效，而真正的關閉會用較晚的 request.time。這裡把記憶體裡的
+      // 截止時間往後 1 微秒，已經存在的一般成員碼才會立刻失效。
+      // Firestore 寫入用 FieldValue.serverTimestamp()，不採用這 1 微秒。
+      resetAt = server.toUtc().add(const Duration(microseconds: 1));
+    } else {
+      resetAt = trip.invitesResetAt;
+    }
+    final updated = trip.copy(
+      publicInvite: enabled,
+      setInvitesResetAt: true,
+      invitesResetAt: resetAt,
+      updatedAt: now,
+    );
     await local.saveTrip(updated);
     await local.enqueue(SyncOp(type: SyncOpType.upsertTrip, tripId: tripId));
     await _trySync();
@@ -596,13 +614,12 @@ class OfflineTripRepository implements TripRepository {
   }
 
   Future<void> _recordTimeSample() async {
-    final serverNow = await remote.serverNow();
-    final deviceNow = await clock.now();
+    final reading = await remote.readServerClock(clock.now);
     final elapsed = await clock.elapsedRealtime();
     await local.saveTimeSample(
       TimeSample(
-        serverNow: serverNow.toUtc(),
-        deviceNow: deviceNow.toUtc(),
+        serverNow: reading.serverNow.toUtc(),
+        deviceNow: reading.deviceNow.toUtc(),
         elapsedRealtime: elapsed,
       ),
     );
@@ -696,16 +713,18 @@ class OfflineTripRepository implements TripRepository {
     }
   }
 
-  InviteRecord _issued(
-    String code,
-    String tripId,
-    String createdBy,
-    MemberRole issuerRole,
-    DateTime createdAt,
-  ) {
+  InviteRecord _issued({
+    required String code,
+    required String tripId,
+    required String tripTitle,
+    required String createdBy,
+    required MemberRole issuerRole,
+    required DateTime createdAt,
+  }) {
     return InviteRecord(
       code: code.trim().toUpperCase(),
       tripId: tripId,
+      tripTitle: tripTitle,
       createdBy: createdBy,
       issuerRole: issuerRole,
       createdAt: createdAt.toUtc(),

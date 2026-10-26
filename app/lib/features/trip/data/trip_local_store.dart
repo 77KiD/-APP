@@ -19,7 +19,7 @@ class TripLocalStore {
   Future<void> saveTrip(Trip trip) {
     return _store.transaction((draft) {
       final trips = _child(draft, 'trips');
-      trips[trip.id] = TripCodec.tripToMap(trip);
+      trips[trip.id] = TripCodec.tripToLocalMap(trip);
       draft['trips'] = trips;
     });
   }
@@ -58,7 +58,7 @@ class TripLocalStore {
       final tripMembers = current is Map
           ? Map<String, dynamic>.from(current)
           : <String, dynamic>{};
-      tripMembers[member.userId] = TripCodec.memberToMap(member);
+      tripMembers[member.userId] = TripCodec.memberToLocalMap(member);
       root[member.tripId] = tripMembers;
       draft['members'] = root;
     });
@@ -69,7 +69,7 @@ class TripLocalStore {
       final root = _child(draft, 'members');
       root[tripId] = {
         for (final member in members)
-          member.userId: TripCodec.memberToMap(member),
+          member.userId: TripCodec.memberToLocalMap(member),
       };
       draft['members'] = root;
     });
@@ -94,7 +94,7 @@ class TripLocalStore {
       final tripRequests = current is Map
           ? Map<String, dynamic>.from(current)
           : <String, dynamic>{};
-      tripRequests[request.id] = TripCodec.requestToMap(request);
+      tripRequests[request.id] = TripCodec.requestToLocalMap(request);
       root[request.tripId] = tripRequests;
       draft['requests'] = root;
     });
@@ -105,7 +105,7 @@ class TripLocalStore {
       final root = _child(draft, 'requests');
       root[tripId] = {
         for (final request in requests)
-          request.id: TripCodec.requestToMap(request),
+          request.id: TripCodec.requestToLocalMap(request),
       };
       draft['requests'] = root;
     });
@@ -115,16 +115,7 @@ class TripLocalStore {
     final code = invite.code.trim().toUpperCase();
     return _store.transaction((draft) {
       final invites = _child(draft, 'invites');
-      invites[code] = TripCodec.inviteToMap(
-        InviteRecord(
-          code: code,
-          tripId: invite.tripId,
-          createdBy: invite.createdBy,
-          issuerRole: invite.issuerRole,
-          createdAt: invite.createdAt,
-          expiresAt: invite.expiresAt,
-        ),
-      );
+      invites[code] = TripCodec.inviteToMap(invite);
       draft['invites'] = invites;
     });
   }
@@ -222,7 +213,7 @@ class TripLocalStore {
       final people = current is Map
           ? Map<String, dynamic>.from(current)
           : <String, dynamic>{};
-      people[snapshot.userId] = TripCodec.locationToMap(snapshot);
+      people[snapshot.userId] = TripCodec.locationToLocalMap(tripId, snapshot);
       root[tripId] = people;
       draft['locations'] = root;
     });

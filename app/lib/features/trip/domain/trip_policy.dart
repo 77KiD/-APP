@@ -1,4 +1,5 @@
 import 'package:group_trip/core/time/time_rules.dart';
+import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/l10n/app_strings.dart';
 
@@ -34,7 +35,7 @@ abstract final class TripPolicy {
     if (title.isEmpty) {
       return ParsedNewTrip(form: form, error: AppStrings.emptyTitle);
     }
-    if (title.length > 40) {
+    if (title.length > FirestoreSchema.maxTitleLength) {
       return ParsedNewTrip(form: form, error: AppStrings.titleTooLong);
     }
     if (CalendarDate.parse(form.startDate) == null ||
@@ -119,14 +120,16 @@ abstract final class TripPolicy {
   static bool canTogglePublicInvite(MemberRole? role) =>
       role == MemberRole.captain || role == MemberRole.viceCaptain;
 
-  /// 公開邀請關掉時，一般成員產生的碼立刻不能用。隊長與副隊長的碼不受影響。
-  /// 再打開公開邀請後，還沒滿 1 小時的一般成員碼可以恢復使用。
+  /// 一般成員的碼在 [invitesResetAt] 之前產生的立刻不能用。
+  /// 隊長與副隊長的碼不受這道截止時間影響。再打開公開邀請也不清掉截止時間。
   static bool memberInviteBlocked({
-    required bool publicInvite,
+    required DateTime? invitesResetAt,
     required MemberRole issuerRole,
+    required DateTime createdAt,
   }) {
-    if (publicInvite) return false;
-    return issuerRole == MemberRole.member;
+    if (issuerRole != MemberRole.member) return false;
+    if (invitesResetAt == null) return false;
+    return createdAt.toUtc().isBefore(invitesResetAt.toUtc());
   }
 
   /// 有副隊長，或 2–4 人團：30 分鐘過期。

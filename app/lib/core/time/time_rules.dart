@@ -75,6 +75,17 @@ abstract final class AgePolicy {
   }
 }
 
+/// `clockProbes/{uid}.t` 讀回的伺服器時間，以及拿來相減的手機牆鐘。
+class ServerClockReading {
+  const ServerClockReading({required this.serverNow, required this.deviceNow});
+
+  final DateTime serverNow;
+  final DateTime deviceNow;
+
+  /// 伺服器時間減手機牆鐘。手機快的時候是負的。
+  Duration get offset => serverNow.difference(deviceNow);
+}
+
 /// 上次連線時記下的伺服器時間、手機時間，以及 Android elapsedRealtime。
 class TimeSample {
   const TimeSample({

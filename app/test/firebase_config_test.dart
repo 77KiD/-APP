@@ -16,7 +16,9 @@ void main() {
     expect(FirestorePaths.itineraryHistory, 'itineraryHistory');
     expect(FirestorePaths.handover, 'handover');
     expect(FirestorePaths.soloNotices, 'soloNotices');
-    expect(FirestorePaths.inviteCodes, 'inviteCodes');
+    expect(FirestorePaths.inviteCodes, 'invites');
+    expect(FirestorePaths.itinerary, 'itinerary');
+    expect(FirestorePaths.clockProbes, 'clockProbes');
     expect(FirestorePaths.users, 'users');
     expect(FirestorePaths.all, contains(FirestorePaths.locations));
   });

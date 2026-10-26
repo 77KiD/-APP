@@ -31,7 +31,9 @@ Future<AppDependencies> buildAppDependencies() async {
 
   final AuthRepository auth;
   if (configured) {
-    final firebaseAuth = FirebaseAuthRepository();
+    final firebaseAuth = FirebaseAuthRepository(
+      consentStore: FileDocumentStore(File('${directory.path}/consent.json')),
+    );
     await firebaseAuth.restore();
     auth = firebaseAuth;
   } else {
