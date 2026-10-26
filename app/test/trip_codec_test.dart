@@ -28,26 +28,42 @@ void main() {
     );
     final memberMap = TripCodec.memberToMap(member);
     expect(memberMap.containsKey('birthday'), isFalse);
-    expect(memberMap['role'], 'captain');
+    expect(memberMap['role'], 'leader');
+    expect(memberMap.containsKey('userId'), isFalse);
     expect(TripCodec.memberFromMap(memberMap).role, MemberRole.captain);
-    final restored = TripCodec.tripFromMap(TripCodec.tripToMap(trip));
+    final wire = TripCodec.tripToMap(trip);
+    expect(wire['schemaVersion'], 1);
+    expect(wire['leaderId'], 'u1');
+    expect(wire.containsKey('captainId'), isFalse);
+    expect(wire.containsKey('inviteCode'), isFalse);
+    final restored = TripCodec.tripFromMap(wire, id: trip.id);
     expect(restored.expectedReturnAt, trip.expectedReturnAt);
     expect(restored.timeZone, 'Asia/Taipei');
     expect(restored.publicInvite, isTrue);
+    expect(restored.captainId, 'u1');
     final invite = InviteRecord(
       code: 'AB2345',
       tripId: 't1',
+      tripTitle: '京都',
       createdBy: 'u1',
+      issuerRole: MemberRole.captain,
       createdAt: trip.createdAt,
       expiresAt: trip.createdAt.add(const Duration(hours: 1)),
     );
     expect(TripCodec.inviteToMap(invite).keys, {
-      'code',
       'tripId',
+      'tripTitle',
       'createdBy',
+      'creatorRole',
+      'active',
       'createdAt',
       'expiresAt',
     });
+    expect(TripCodec.inviteToMap(invite)['creatorRole'], 'leader');
+    expect(
+      TripCodec.inviteFromMap(TripCodec.inviteToMap(invite)).issuerRole,
+      MemberRole.captain,
+    );
     expect(
       TripCodec.inviteFromMap(TripCodec.inviteToMap(invite)).expiresAt,
       invite.expiresAt,
@@ -55,7 +71,7 @@ void main() {
     expect(
       TripCodec.tripFromMap({
         ...TripCodec.tripToMap(trip),
-        'publicInvite': false,
+        'invitesOpen': false,
       }).publicInvite,
       isFalse,
     );
@@ -67,23 +83,24 @@ void main() {
         Handover(
           id: 'h1',
           tripId: 't1',
-          fromUserId: 'a',
-          toUserId: 'b',
+          fromLeaderId: 'a',
+          toMemberId: 'b',
           status: 'pending',
           createdAt: DateTime.utc(2026, 10, 26),
         ),
       ),
     );
-    expect(handover.toUserId, 'b');
+    expect(handover.toMemberId, 'b');
+    expect(handover.rejectionCount, 0);
     final notice = TripCodec.soloNoticeFromMap(
       TripCodec.soloNoticeToMap(
         SoloNotice(
           id: 's1',
           tripId: 't1',
-          userId: 'a',
+          memberId: 'a',
           expectedBackAt: DateTime.utc(2026, 11, 1, 9),
           isMinor: true,
-          approved: false,
+          status: 'announced',
           createdAt: DateTime.utc(2026, 10, 26),
         ),
       ),
@@ -98,6 +115,10 @@ void main() {
       ),
     );
     expect(location.containsKey('mapTile'), isFalse);
-    expect(location.keys, containsAll(['userId', 'latitude', 'longitude', 'sentAt']));
+    expect(location.containsKey('userId'), isFalse);
+    expect(
+      location.keys,
+      containsAll(['latitude', 'longitude', 'sentAt', 'receivedAt']),
+    );
   });
 }

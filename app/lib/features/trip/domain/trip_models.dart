@@ -1,3 +1,4 @@
+import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/l10n/app_strings.dart';
 
 enum MemberRole {
@@ -11,17 +12,21 @@ enum MemberRole {
     MemberRole.member => AppStrings.roleMember,
   };
 
+  /// 寫進 Firestore 的角色。畫面仍是隊長、副隊長、一般成員。
   String get wire => switch (this) {
-    MemberRole.captain => 'captain',
-    MemberRole.viceCaptain => 'viceCaptain',
-    MemberRole.member => 'member',
+    MemberRole.captain => FirestoreSchema.roleLeader,
+    MemberRole.viceCaptain => FirestoreSchema.roleDeputy,
+    MemberRole.member => FirestoreSchema.roleMember,
   };
 
   static MemberRole parse(String raw) {
-    return MemberRole.values.firstWhere(
-      (role) => role.wire == raw,
-      orElse: () => MemberRole.member,
-    );
+    return switch (raw) {
+      FirestoreSchema.roleLeader ||
+      LocalOnlyFields.legacyRoleCaptain => MemberRole.captain,
+      FirestoreSchema.roleDeputy ||
+      LocalOnlyFields.legacyRoleDeputy => MemberRole.viceCaptain,
+      _ => MemberRole.member,
+    };
   }
 
   bool get canEditExpectedReturnDirectly =>
@@ -54,6 +59,7 @@ class Trip {
     required this.expectedReturnAt,
     required this.inviteCode,
     this.publicInvite = true,
+    this.invitesResetAt,
     required this.status,
     required this.memberIds,
     required this.createdAt,
@@ -69,8 +75,11 @@ class Trip {
   final DateTime? expectedReturnAt;
   final String inviteCode;
 
-  /// 預設開啟。關閉後只有隊長和副隊長可以產生新的邀請碼。
+  /// 對應 Firestore `invitesOpen`。預設開啟。
   final bool publicInvite;
+
+  /// 關掉公開邀請時寫下的截止時間。再打開時保留，一般成員較早的碼不會恢復。
+  final DateTime? invitesResetAt;
   final TripStatus status;
   final List<String> memberIds;
   final DateTime createdAt;
@@ -82,6 +91,8 @@ class Trip {
     TripStatus? status,
     String? inviteCode,
     bool? publicInvite,
+    bool setInvitesResetAt = false,
+    DateTime? invitesResetAt,
     bool setExpectedReturn = false,
     DateTime? expectedReturnAt,
   }) {
@@ -97,6 +108,7 @@ class Trip {
           : this.expectedReturnAt,
       inviteCode: inviteCode ?? this.inviteCode,
       publicInvite: publicInvite ?? this.publicInvite,
+      invitesResetAt: setInvitesResetAt ? invitesResetAt : this.invitesResetAt,
       status: status ?? this.status,
       memberIds: memberIds ?? this.memberIds,
       createdAt: createdAt,
@@ -114,6 +126,7 @@ class TripMember {
     required this.isMinor,
     required this.joinedAt,
     this.photoUrl,
+    this.inviteCode,
   });
 
   final String tripId;
@@ -124,6 +137,9 @@ class TripMember {
   final bool isMinor;
   final DateTime joinedAt;
 
+  /// 隊長是 null。加入的人是當時使用的邀請碼。
+  final String? inviteCode;
+
   TripMember copy({MemberRole? role}) {
     return TripMember(
       tripId: tripId,
@@ -133,6 +149,7 @@ class TripMember {
       role: role ?? this.role,
       isMinor: isMinor,
       joinedAt: joinedAt,
+      inviteCode: inviteCode,
     );
   }
 }
@@ -288,18 +305,22 @@ class Handover {
   const Handover({
     required this.id,
     required this.tripId,
-    required this.fromUserId,
-    required this.toUserId,
+    required this.fromLeaderId,
+    required this.toMemberId,
     required this.status,
     required this.createdAt,
+    this.rejectionCount = 0,
+    this.resolvedAt,
   });
 
   final String id;
   final String tripId;
-  final String fromUserId;
-  final String toUserId;
+  final String fromLeaderId;
+  final String toMemberId;
   final String status;
+  final int rejectionCount;
   final DateTime createdAt;
+  final DateTime? resolvedAt;
 }
 
 /// `trips/{tripId}/soloNotices`。未成年者的單獨行動需要正副隊長其中一位同意。
@@ -307,19 +328,19 @@ class SoloNotice {
   const SoloNotice({
     required this.id,
     required this.tripId,
-    required this.userId,
+    required this.memberId,
     required this.expectedBackAt,
     required this.isMinor,
-    required this.approved,
+    required this.status,
     required this.createdAt,
   });
 
   final String id;
   final String tripId;
-  final String userId;
+  final String memberId;
   final DateTime expectedBackAt;
   final bool isMinor;
-  final bool approved;
+  final String status;
   final DateTime createdAt;
 }
 
@@ -340,13 +361,16 @@ class LocationSnapshot {
   final String? photoUrl;
 }
 
-/// `inviteCodes/{code}`。建立後 1 小時到期。同一碼在到期前可以給多個人使用。
+/// `invites/{code}`。建立後 1 小時到期。同一碼在到期前可以給多個人使用。
 /// 產生新碼不會改寫其他碼的 [expiresAt]。
 class InviteRecord {
   const InviteRecord({
     required this.code,
     required this.tripId,
     required this.createdBy,
+    this.issuerRole = MemberRole.captain,
+    this.tripTitle = '',
+    this.active = true,
     required this.createdAt,
     required this.expiresAt,
   });
@@ -354,6 +378,11 @@ class InviteRecord {
   final String code;
   final String tripId;
   final String createdBy;
+
+  /// 產生這個碼當時的角色，寫進 `creatorRole`。之後升職或降職不會改這欄。
+  final MemberRole issuerRole;
+  final String tripTitle;
+  final bool active;
   final DateTime createdAt;
   final DateTime expiresAt;
 }
@@ -369,18 +398,16 @@ enum SyncOpType {
 }
 
 class SyncOp {
-  const SyncOp({
-    required this.type,
-    required this.tripId,
-    this.entityId,
-  });
+  const SyncOp({required this.type, required this.tripId, this.entityId});
 
   final SyncOpType type;
   final String tripId;
   final String? entityId;
 
   bool sameAs(SyncOp other) =>
-      type == other.type && tripId == other.tripId && entityId == other.entityId;
+      type == other.type &&
+      tripId == other.tripId &&
+      entityId == other.entityId;
 }
 
 class TripException implements Exception {
@@ -402,6 +429,10 @@ class InviteNotFoundException extends TripException {
 
 class InviteExpiredException extends TripException {
   InviteExpiredException() : super(AppStrings.inviteExpired);
+}
+
+class InviteClosedException extends TripException {
+  InviteClosedException() : super(AppStrings.inviteClosedByPublicInvite);
 }
 
 class AlreadyMemberException extends TripException {

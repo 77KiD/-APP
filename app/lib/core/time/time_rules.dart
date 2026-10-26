@@ -1,3 +1,4 @@
+import 'package:group_trip/data/firestore_schema.dart';
 import 'package:timezone/timezone.dart' as tz;
 
 /// 日曆日期，不含時分。生日與旅程起迄都用這個，避免 UTC 時戳把日期撥到前一天。
@@ -75,6 +76,17 @@ abstract final class AgePolicy {
   }
 }
 
+/// `clockProbes/{uid}.t` 讀回的伺服器時間，以及拿來相減的手機牆鐘。
+class ServerClockReading {
+  const ServerClockReading({required this.serverNow, required this.deviceNow});
+
+  final DateTime serverNow;
+  final DateTime deviceNow;
+
+  /// 伺服器時間減手機牆鐘。手機快的時候是負的。
+  Duration get offset => serverNow.difference(deviceNow);
+}
+
 /// 上次連線時記下的伺服器時間、手機時間，以及 Android elapsedRealtime。
 class TimeSample {
   const TimeSample({
@@ -88,17 +100,17 @@ class TimeSample {
   final Duration elapsedRealtime;
 
   Map<String, Object> toMap() => {
-    'serverNow': serverNow.toUtc().toIso8601String(),
-    'deviceNow': deviceNow.toUtc().toIso8601String(),
-    'elapsedMs': elapsedRealtime.inMilliseconds,
+    LocalOnlyFields.serverNow: serverNow.toUtc().toIso8601String(),
+    LocalOnlyFields.deviceNow: deviceNow.toUtc().toIso8601String(),
+    LocalOnlyFields.elapsedMs: elapsedRealtime.inMilliseconds,
   };
 
   static TimeSample? fromMap(Object? raw) {
     if (raw is! Map) return null;
     final map = Map<String, dynamic>.from(raw);
-    final server = DateTime.tryParse('${map['serverNow']}');
-    final device = DateTime.tryParse('${map['deviceNow']}');
-    final elapsed = map['elapsedMs'];
+    final server = DateTime.tryParse('${map[LocalOnlyFields.serverNow]}');
+    final device = DateTime.tryParse('${map[LocalOnlyFields.deviceNow]}');
+    final elapsed = map[LocalOnlyFields.elapsedMs];
     if (server == null || device == null || elapsed is! num) return null;
     return TimeSample(
       serverNow: server.toUtc(),
@@ -122,9 +134,9 @@ abstract final class CorrectedClock {
       final offset = sample.serverNow.difference(sample.deviceNow);
       return deviceNow.toUtc().add(offset);
     }
-    return sample.serverNow
-        .toUtc()
-        .add(elapsedRealtime - sample.elapsedRealtime);
+    return sample.serverNow.toUtc().add(
+      elapsedRealtime - sample.elapsedRealtime,
+    );
   }
 }
 

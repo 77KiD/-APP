@@ -1,3 +1,4 @@
+import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/l10n/app_strings.dart';
 
 class UserAccount {
@@ -42,15 +43,31 @@ class UserAccount {
     );
   }
 
-  /// 給 Firestore `users/{uid}` 的公開欄位。不含密碼。
+  /// Firestore `users/{uid}`。同意旗標不在這份文件裡。
   Map<String, Object?> toPublicMap() => {
-    'displayName': displayName,
-    'birthday': birthday,
-    'photoUrl': photoUrl,
-    'analyticsConsent': analyticsConsent,
-    'crashlyticsConsent': crashlyticsConsent,
-    'consentDecided': consentDecided,
+    FirestoreSchema.birthdate: birthday,
+    FirestoreSchema.displayName: displayName,
+    FirestoreSchema.photoUrl: photoUrl,
   };
+
+  /// 只留在這台手機。含出生日期字串與分析同意。
+  Map<String, Object?> toDeviceMap() => {
+    LocalOnlyFields.documentId: id,
+    LocalOnlyFields.email: email,
+    FirestoreSchema.displayName: displayName,
+    LocalOnlyFields.birthday: birthday,
+    FirestoreSchema.photoUrl: photoUrl,
+    LocalOnlyFields.analyticsConsent: analyticsConsent,
+    LocalOnlyFields.crashlyticsConsent: crashlyticsConsent,
+    LocalOnlyFields.consentDecided: consentDecided,
+  };
+}
+
+class ProfileWriteFailure extends SignUpFailure {
+  const ProfileWriteFailure();
+
+  @override
+  String get message => AppStrings.profileNotSaved;
 }
 
 sealed class SignUpFailure {

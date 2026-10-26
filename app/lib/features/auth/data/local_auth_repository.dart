@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:group_trip/core/ids/id_generator.dart';
 import 'package:group_trip/core/persistence/json_document_store.dart';
+import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/features/auth/domain/auth_models.dart';
 import 'package:group_trip/features/auth/domain/sign_up_flow.dart';
 
@@ -18,7 +19,7 @@ class LocalAuthRepository implements AuthRepository {
 
   Future<void> restore() async {
     final data = await store.read();
-    final session = data['sessionUserId'];
+    final session = data[LocalOnlyFields.sessionUserId];
     if (session is! String) return;
     _current = _accountFromUsers(data, session);
   }
@@ -69,14 +70,15 @@ class LocalAuthRepository implements AuthRepository {
     await store.transaction((draft) {
       final users = _users(draft);
       users[account.id] = {
-        ...account.toPublicMap(),
-        'id': account.id,
-        'email': account.email,
-        'passwordSalt': salt,
-        'passwordHash': _hash(password: request.password, salt: salt),
+        ...account.toDeviceMap(),
+        LocalOnlyFields.passwordSalt: salt,
+        LocalOnlyFields.passwordHash: _hash(
+          password: request.password,
+          salt: salt,
+        ),
       };
-      draft['users'] = users;
-      draft['sessionUserId'] = account.id;
+      draft[FirestoreSchema.users] = users;
+      draft[LocalOnlyFields.sessionUserId] = account.id;
     });
     _emit(account);
     return account;
@@ -89,9 +91,12 @@ class LocalAuthRepository implements AuthRepository {
   }) async {
     final data = await store.read();
     final record = _findRecord(data, email.trim().toLowerCase());
-    if (record == null) return const SignInOutcome.failure(WrongCredentialsFailure());
-    final salt = '${record['passwordSalt']}';
-    if (_hash(password: password, salt: salt) != record['passwordHash']) {
+    if (record == null) {
+      return const SignInOutcome.failure(WrongCredentialsFailure());
+    }
+    final salt = '${record[LocalOnlyFields.passwordSalt]}';
+    if (_hash(password: password, salt: salt) !=
+        record[LocalOnlyFields.passwordHash]) {
       return const SignInOutcome.failure(WrongCredentialsFailure());
     }
     final account = _accountFromRecord(record);
@@ -99,7 +104,7 @@ class LocalAuthRepository implements AuthRepository {
       return const SignInOutcome.failure(MissingProfileFailure());
     }
     await store.transaction((draft) {
-      draft['sessionUserId'] = account.id;
+      draft[LocalOnlyFields.sessionUserId] = account.id;
     });
     _emit(account);
     return SignInOutcome.success(account);
@@ -108,7 +113,7 @@ class LocalAuthRepository implements AuthRepository {
   @override
   Future<void> signOut() async {
     await store.transaction((draft) {
-      draft.remove('sessionUserId');
+      draft.remove(LocalOnlyFields.sessionUserId);
     });
     _emit(null);
   }
@@ -131,9 +136,9 @@ class LocalAuthRepository implements AuthRepository {
       final record = current is Map
           ? Map<String, dynamic>.from(current)
           : <String, dynamic>{};
-      record.addAll(updated.toPublicMap());
+      record.addAll(updated.toDeviceMap());
       users[account.id] = record;
-      draft['users'] = users;
+      draft[FirestoreSchema.users] = users;
     });
     _emit(updated);
     return updated;
@@ -152,7 +157,7 @@ class LocalAuthRepository implements AuthRepository {
   Map<String, dynamic>? _findRecord(Map<String, dynamic> data, String email) {
     final users = _users(data);
     for (final raw in users.values) {
-      if (raw is Map && raw['email'] == email) {
+      if (raw is Map && raw[LocalOnlyFields.email] == email) {
         return Map<String, dynamic>.from(raw);
       }
     }
@@ -166,24 +171,25 @@ class LocalAuthRepository implements AuthRepository {
   }
 
   UserAccount? _accountFromRecord(Map<String, dynamic> record) {
-    final id = record['id'];
-    final email = record['email'];
-    final birthday = record['birthday'];
+    final id = record[LocalOnlyFields.documentId];
+    final email = record[LocalOnlyFields.email];
+    final birthday =
+        record[LocalOnlyFields.birthday] ?? record[FirestoreSchema.birthdate];
     if (id is! String || email is! String || birthday is! String) return null;
     return UserAccount(
       id: id,
       email: email,
-      displayName: '${record['displayName'] ?? ''}',
+      displayName: '${record[FirestoreSchema.displayName] ?? ''}',
       birthday: birthday,
-      photoUrl: record['photoUrl'] as String?,
-      consentDecided: record['consentDecided'] == true,
-      analyticsConsent: record['analyticsConsent'] == true,
-      crashlyticsConsent: record['crashlyticsConsent'] == true,
+      photoUrl: record[FirestoreSchema.photoUrl] as String?,
+      consentDecided: record[LocalOnlyFields.consentDecided] == true,
+      analyticsConsent: record[LocalOnlyFields.analyticsConsent] == true,
+      crashlyticsConsent: record[LocalOnlyFields.crashlyticsConsent] == true,
     );
   }
 
   Map<String, dynamic> _users(Map<String, dynamic> data) {
-    final value = data['users'];
+    final value = data[FirestoreSchema.users];
     if (value is Map) return Map<String, dynamic>.from(value);
     return {};
   }

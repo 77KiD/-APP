@@ -42,24 +42,26 @@ flutter run \
 
 ## 資料路徑
 
-旅程是根（ADR 0005）。時間以 UTC ISO-8601 字串儲存，日期是 `YYYY-MM-DD`。
+旅程是根（ADR 0005）。寫進 Firestore 的時間是 timestamp，本機 JSON 用 UTC ISO-8601。日期是 `YYYY-MM-DD`。欄位名稱集中在 `app/lib/data/firestore_schema.dart`，對齊 `docs/data-model.md`。
 
 | 路徑 | 內容 |
 | --- | --- |
-| `users/{uid}` | 顯示名稱、生日、頭像網址、分析與當機報告同意。沒有密碼。 |
-| `trips/{tripId}` | 標題、隊長、起迄日、IANA `timeZone`、選填 `expectedReturnAt`、建立當下的邀請碼、`publicInvite`（公開邀請，預設 true）、狀態、`memberIds`、建立與更新時間。 |
-| `trips/{tripId}/members/{uid}` | 顯示名稱、`role`（`captain`／`viceCaptain`／`member`）、`isMinor`、加入時間。沒有生日。 |
-| `trips/{tripId}/requests/{id}` | 預計回程時間的修改申請。`expiresAt` 可為 null。 |
-| `trips/{tripId}/itineraryDays/{YYYY-MM-DD}` | 當天景點：名稱、順序、時間、`placeId`、座標與座標快取時間。 |
-| `trips/{tripId}/itineraryHistory/{id}` | 被覆蓋的行程版本。 |
+| `users/{uid}` | `birthdate`（UTC 午夜 timestamp）、`displayName`、`photoUrl`、`createdAt`、`updatedAt`。沒有密碼，也沒有分析同意。同意只留在這台手機。 |
+| `users/{uid}/tripRefs/{tripId}` | 首頁用的旅程索引。`trips` 不能列出。 |
+| `users/{uid}/syncAnchors/{deviceId}` | 離線校正錨點。佇列送完才寫。 |
+| `clockProbes/{uid}` | 唯一欄位 `t`。用戶端寫 `FieldValue.serverTimestamp()`，讀回來和手機牆鐘相減得到時間差。每人只能讀寫自己的文件。 |
+| `trips/{tripId}` | `schemaVersion`、`title`、`leaderId`、起迄日、`timeZone`、`expectedReturnAt`、交通欄位、`invitesOpen`、`invitesResetAt`、狀態與建立／更新時間。沒有 `captainId`、`memberIds`、`inviteCode`。 |
+| `trips/{tripId}/members/{uid}` | `role`（`leader`／`deputy`／`member`）、`isMinor`、`displayName`、`photoUrl`、`inviteCode`、`joinedAt`。沒有生日。 |
+| `trips/{tripId}/requests/{id}` | 修改申請。預計回程時間的 `type` 是 `expected_return_at`。 |
+| `trips/{tripId}/itinerary/{YYYY-MM-DD}` | `stops`、`backupStops`、`clientSavedAt`、`updatedBy`、`updatedAt`。景點用 `place_id`。 |
+| `trips/{tripId}/itineraryHistory/{id}` | 被覆蓋或沒被採用的行程版本。 |
 | `trips/{tripId}/locations/{uid}` | 位置快照形狀。這一版沒有發送定位。 |
 | `trips/{tripId}/handover/{id}`、`trips/{tripId}/soloNotices/{id}` | 交接與單獨行動的形狀。流程不在 #3。 |
-| `inviteCodes/{CODE}` | `tripId`、`createdBy`、`createdAt`、`expiresAt`（建立後 1 小時）。非成員用邀請碼加入時先查這層。同一個碼在到期前可以給多個人用。新碼不會改寫其他碼。 |
-| `_meta/clock` | 登入使用者寫入 `FieldValue.serverTimestamp()`，給 ADR 0004 的校正時鐘。不含個資。 |
+| `invites/{CODE}` | 8–12 個英數。`tripId`、`tripTitle`、`createdBy`、`creatorRole`（產生當下的 `leader`／`deputy`／`member`）、`active`、`createdAt`、`expiresAt`。同一個碼在到期前可以給多個人用。新碼不會改寫其他碼。 |
 
-角色在畫面上是隊長、副隊長、一般成員。一般成員改預計回程時間會送修改申請；隊長與副隊長直接寫入。不能改成比現在早。副隊長最多一位，而且只有成員至少 5 人、由隊長指定。8 人以上沒有副隊長時，介面會說明還不能開始，這一版沒有「開始旅程」按鈕。
+角色在畫面上是隊長、副隊長、一般成員。寫進文件的字串是 `leader`、`deputy`、`member`。一般成員改預計回程時間會送修改申請；隊長與副隊長直接寫入。不能改成比現在早。副隊長最多一位，而且只有成員至少 5 人、由隊長指定。8 人以上沒有副隊長時，介面會說明還不能開始，這一版沒有「開始旅程」按鈕。
 
-公開邀請預設開啟，任何成員都可以產生邀請碼。隊長關掉之後，只有隊長和副隊長可以產生；一般成員的按鈕會停用，並說明原因。畫面上的剩餘時間依這台手機估算，只供參考。加入時是否過期以伺服器時間與 `expiresAt` 為準。
+公開邀請（`invitesOpen`）預設開啟，任何成員都可以產生邀請碼。隊長或副隊長關掉時，同一筆寫入把 `invitesResetAt` 設成伺服器時間。一般成員在這個時間之前產生的邀請碼立刻不能加入，再打開公開邀請也不會清掉 `invitesResetAt`，那些碼不會恢復。隊長和副隊長產生的碼仍用到各自的 `expiresAt`。產生新碼不會改寫其他碼。一般成員的按鈕會停用，並說明原因。畫面上的剩餘時間依這台手機估算，只供參考。加入時是否過期以伺服器時間為準。
 
 離線時先寫本機 JSON，恢復連線再送出。行程以校正後的 `updatedAt` 後寫入勝出，落敗的版本進 `itineraryHistory`。離線快取只留行程名稱、順序、時間、`place_id` 與座標；座標以 UTC 日曆日計算，滿 30 日刪除，名稱與 `place_id` 保留。不快取 Google 路線、交通時間或地圖圖磚。
 
@@ -70,14 +72,14 @@ cd app
 flutter test
 ```
 
-CI（`.github/workflows/flutter.yml`）在 Flutter 3.47.8 上跑 `flutter analyze` 與 `flutter test`。接受標準用假的遠端與本機檔，不連 Firebase 模擬器。未滿 13 歲不能註冊，以及斷網仍可建立旅程，都有測試。
+CI（`.github/workflows/flutter.yml`）在 Flutter 3.47.8 上跑 `flutter analyze` 與 `flutter test`，另外用 Firestore 模擬器跑 `integration/rules-contract`，確認現在的寫入形狀能通過後端規則。未滿 13 歲不能註冊，以及斷網仍可建立旅程，都有測試。
 
 ## 留給後端
 
 - Firebase 專案、Auth、Firestore，以及真正的 `google-services.json`（不要提交）。
-- 安全規則：非成員不能讀旅程；生日只在 `users`；成員文件沒有生日；`inviteCodes/{code}` 讓已登入者讀得到該碼以便加入，但讀不到行程；列出某旅程的邀請碼只限成員。加入時必須用伺服器時間拒絕 `request.time >= expiresAt`。寫入時 `expiresAt` 不得晚於 `createdAt` 加 1 小時。`publicInvite == false` 時，只有隊長和副隊長可以新增邀請碼。`_meta/clock` 允許已登入使用者寫入伺服器時間戳、不能寫個資。用戶端檢查不是安全邊界。
+- 安全規則與 Cloud Functions 仍由後端維護。這個用戶端依 `docs/data-model.md` 寫入，不在這裡改規則。
+- 伺服器時間走 `clockProbes/{uid}` 的 `t`，不再使用 `_meta/clock`。
 - Cloud Functions：修改申請到期、旅程在預計回程時間（或沒填時的結束日 23:59，旅程時區）結束並清位置、刪除帳號、8 人以上沒有副隊長不能開始。
-- 模擬器加規則的 CI。用戶端測試用假實作，對應 issue #1 允許的做法。
 - FCM、Maps 金鑰、發送定位。這一版不收集 FCM 權杖，也沒有背景定位。
 
-Gradle 在有 `google-services.json` 時才套用外掛。這個環境沒有跑過 Android Gradle 建置。
+Gradle 在有 `google-services.json` 時才套用外掛。沒有該檔也能 `flutter build apk --debug`。

@@ -2,17 +2,26 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:group_trip/core/persistence/json_document_store.dart';
+import 'package:group_trip/core/time/time_rules.dart';
+import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/features/auth/domain/auth_models.dart';
 import 'package:group_trip/features/auth/domain/sign_up_flow.dart';
 import 'package:group_trip/features/trip/data/firestore_paths.dart';
 
 class FirebaseAuthRepository implements AuthRepository {
-  FirebaseAuthRepository({FirebaseAuth? auth, FirebaseFirestore? firestore})
-    : _auth = auth ?? FirebaseAuth.instance,
-      _firestore = firestore ?? FirebaseFirestore.instance;
+  FirebaseAuthRepository({
+    FirebaseAuth? auth,
+    FirebaseFirestore? firestore,
+    this.consentStore,
+  }) : _auth = auth ?? FirebaseAuth.instance,
+       _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
+
+  /// 分析與當機報告的同意只留在這台手機。規則不允許寫進 users。
+  final JsonDocumentStore? consentStore;
   final _updates = StreamController<UserAccount?>.broadcast();
   UserAccount? _current;
   late final Stream<UserAccount?> _watch = _watchImpl();
@@ -72,10 +81,18 @@ class FirebaseAuthRepository implements AuthRepository {
         analyticsConsent: false,
         crashlyticsConsent: false,
       );
-      await _users.doc(account.id).set({
-        ...account.toPublicMap(),
-        'createdAt': DateTime.now().toUtc().toIso8601String(),
-      });
+      try {
+        await _users.doc(account.id).set({
+          FirestoreSchema.birthdate: _utcMidnight(account.birthday),
+          FirestoreSchema.displayName: account.displayName,
+          FirestoreSchema.photoUrl: account.photoUrl,
+          FirestoreSchema.createdAt: FieldValue.serverTimestamp(),
+          FirestoreSchema.updatedAt: FieldValue.serverTimestamp(),
+        });
+      } on FirebaseException {
+        await _discard(user);
+        throw const ProfileWriteFailure();
+      }
       _emit(account);
       return account;
     } on FirebaseAuthException catch (error) {
@@ -125,12 +142,37 @@ class FirebaseAuthRepository implements AuthRepository {
       analyticsConsent: analytics,
       crashlyticsConsent: crashlytics,
     );
-    await _users.doc(account.id).set({
-      ...updated.toPublicMap(),
-      'updatedAt': DateTime.now().toUtc().toIso8601String(),
-    }, SetOptions(merge: true));
+    final store = consentStore;
+    if (store != null) {
+      await store.transaction((draft) {
+        draft[account.id] = {
+          LocalOnlyFields.consentDecided: true,
+          LocalOnlyFields.analyticsConsent: analytics,
+          LocalOnlyFields.crashlyticsConsent: crashlytics,
+        };
+      });
+    }
     _emit(updated);
     return updated;
+  }
+
+  Future<void> _discard(User user) async {
+    try {
+      await user.delete();
+    } catch (_) {
+      // 刪不掉時至少不要留在已登入狀態。
+    }
+    try {
+      await _auth.signOut();
+    } catch (_) {}
+  }
+
+  Timestamp _utcMidnight(String birthday) {
+    final date = CalendarDate.parse(birthday);
+    if (date == null) {
+      return Timestamp.fromDate(DateTime.utc(1970));
+    }
+    return Timestamp.fromDate(DateTime.utc(date.year, date.month, date.day));
   }
 
   CollectionReference<Map<String, dynamic>> get _users =>
@@ -141,16 +183,45 @@ class FirebaseAuthRepository implements AuthRepository {
     final data = snap.data();
     if (data == null) return null;
     final email = _auth.currentUser?.email ?? '';
+    final consent = await _readConsent(uid);
     return UserAccount(
       id: uid,
       email: email,
-      displayName: '${data['displayName'] ?? ''}',
-      birthday: '${data['birthday'] ?? ''}',
-      photoUrl: data['photoUrl'] as String?,
-      consentDecided: data['consentDecided'] == true,
-      analyticsConsent: data['analyticsConsent'] == true,
-      crashlyticsConsent: data['crashlyticsConsent'] == true,
+      displayName: '${data[FirestoreSchema.displayName] ?? ''}',
+      birthday: _birthdateText(data[FirestoreSchema.birthdate]),
+      photoUrl: data[FirestoreSchema.photoUrl] as String?,
+      consentDecided: consent.decided,
+      analyticsConsent: consent.analytics,
+      crashlyticsConsent: consent.crashlytics,
     );
+  }
+
+  Future<({bool decided, bool analytics, bool crashlytics})> _readConsent(
+    String uid,
+  ) async {
+    final store = consentStore;
+    if (store == null) {
+      return (decided: false, analytics: false, crashlytics: false);
+    }
+    final data = await store.read();
+    final raw = data[uid];
+    if (raw is! Map) {
+      return (decided: false, analytics: false, crashlytics: false);
+    }
+    return (
+      decided: raw[LocalOnlyFields.consentDecided] == true,
+      analytics: raw[LocalOnlyFields.analyticsConsent] == true,
+      crashlytics: raw[LocalOnlyFields.crashlyticsConsent] == true,
+    );
+  }
+
+  String _birthdateText(Object? raw) {
+    if (raw is Timestamp) {
+      final date = raw.toDate().toUtc();
+      return CalendarDate(date.year, date.month, date.day).format();
+    }
+    if (raw is String) return raw;
+    return '';
   }
 
   void _emit(UserAccount? account) {

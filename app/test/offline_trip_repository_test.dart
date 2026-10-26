@@ -497,6 +497,8 @@ void main() {
     final issued = await memberRepo.issueInviteCode(trip.id);
     expect(issued.code, isNot(original.code));
     expect(issued.createdBy, member.id);
+    expect(issued.issuerRole, MemberRole.member);
+    expect(original.issuerRole, MemberRole.captain);
     expect(
       world.database.invites[original.code]!.expiresAt,
       original.expiresAt,
@@ -516,10 +518,22 @@ void main() {
 
     await world.trips.setPublicInvite(tripId: trip.id, enabled: false);
     expect((await world.trips.getTrip(trip.id)).publicInvite, isFalse);
-    final still = await world
-        .repositoryFor(person('still', '仍可'))
-        .joinWithInviteCode(issued.code);
-    expect(still.memberIds, contains('still'));
+    expect(world.database.invites[issued.code]!.expiresAt, issued.expiresAt);
+    expect(world.database.invites[original.code]!.expiresAt, original.expiresAt);
+    await expectLater(
+      world.repositoryFor(person('still', '仍可')).joinWithInviteCode(issued.code),
+      throwsA(
+        isA<InviteClosedException>().having(
+          (error) => error.message,
+          'message',
+          AppStrings.inviteClosedByPublicInvite,
+        ),
+      ),
+    );
+    final viaCaptain = await world
+        .repositoryFor(person('leader-code', '隊長碼'))
+        .joinWithInviteCode(original.code);
+    expect(viaCaptain.memberIds, contains('leader-code'));
     await expectLater(
       memberRepo.issueInviteCode(trip.id),
       throwsA(
@@ -536,28 +550,47 @@ void main() {
       role: MemberRole.viceCaptain,
     );
     final asVice = await memberRepo.issueInviteCode(trip.id);
+    expect(asVice.issuerRole, MemberRole.viceCaptain);
     expect(asVice.code, isNot(original.code));
-    expect(
-      world.database.invites[original.code]!.expiresAt,
-      original.expiresAt,
+    final viaVice = await world
+        .repositoryFor(person('via-vice', '副隊長碼'))
+        .joinWithInviteCode(asVice.code);
+    expect(viaVice.memberIds, contains('via-vice'));
+    expect(world.database.invites[issued.code]!.expiresAt, issued.expiresAt);
+
+    await memberRepo.setPublicInvite(tripId: trip.id, enabled: true);
+    final reopened = await world.trips.getTrip(trip.id);
+    expect(reopened.publicInvite, isTrue);
+    expect(reopened.invitesResetAt, isNotNull);
+    await expectLater(
+      world
+          .repositoryFor(person('restored', '恢復'))
+          .joinWithInviteCode(issued.code),
+      throwsA(isA<InviteClosedException>()),
     );
+    expect(world.database.invites[issued.code]!.expiresAt, issued.expiresAt);
+
+    await memberRepo.setPublicInvite(tripId: trip.id, enabled: false);
+    await expectLater(
+      world
+          .repositoryFor(person('closed-again', '再開'))
+          .joinWithInviteCode(issued.code),
+      throwsA(isA<InviteClosedException>()),
+    );
+    final captainCode = await world.trips.issueInviteCode(trip.id);
+    expect(captainCode.issuerRole, MemberRole.captain);
+    final viaNewLeader = await world
+        .repositoryFor(person('new-leader', '新隊長碼'))
+        .joinWithInviteCode(captainCode.code);
+    expect(viaNewLeader.memberIds, contains('new-leader'));
+    expect(world.database.invites[original.code]!.expiresAt, original.expiresAt);
+    expect(world.database.invites[issued.code]!.expiresAt, issued.expiresAt);
 
     world.database.members[trip.id]![member.id] = stored;
-    final captainCode = await world.trips.issueInviteCode(trip.id);
-    expect(world.database.invites.containsKey(captainCode.code), isTrue);
-    expect(
-      world.database.invites[original.code]!.expiresAt,
-      original.expiresAt,
-    );
-
     await expectLater(
       memberRepo.setPublicInvite(tripId: trip.id, enabled: true),
       throwsA(isA<RoleChangeException>()),
     );
-    await world.trips.setPublicInvite(tripId: trip.id, enabled: true);
-    final again = await memberRepo.issueInviteCode(trip.id);
-    expect(again.code, isNot(original.code));
-    expect(world.database.invites.containsKey(original.code), isTrue);
   });
 }
 
