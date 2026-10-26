@@ -41,6 +41,9 @@ users/{uid}
   tripRefs/{tripId}
     tripId, role, tripTitle, updatedAt
 
+clockProbes/{uid}
+  t
+
 invites/{code}
   tripId, tripTitle, createdBy, creatorRole, active, expiresAt, createdAt
 
@@ -103,6 +106,18 @@ trips/{tripId}
 | `role` | string | 必須等於該成員文件上的 `role` |
 | `tripTitle` | string | 列表用的標題快照，1–60 字 |
 | `updatedAt` | timestamp | 伺服器時間 |
+
+## clockProbes/{uid}
+
+給客戶端讀伺服器現在時間。文件 ID 必須是自己的 uid。不必先建立 `users/{uid}`。
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `t` | timestamp | 唯一欄位。客戶端寫 `FieldValue.serverTimestamp()`。規則要求它等於這次寫入的 `request.time`，所以自己填的 timestamp 會被拒絕 |
+
+只有本人能 `get`、建立、覆寫。不能 list，不能刪。其他人不能讀，也不能寫。
+
+用法：送出前記下手機時間 `localMs`，寫入 `{ t: serverTimestamp() }`，再把同一份文件讀回來。時鐘差（毫秒）= 讀回的 `t` − `localMs`。這個差只留在客戶端，不要寫回 Firestore。
 
 ## invites/{code}
 

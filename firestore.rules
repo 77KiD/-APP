@@ -367,6 +367,19 @@ service cloud.firestore {
       }
     }
 
+    // Owner reads server time back: the only field is t == request.time.
+    match /clockProbes/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
+
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(["t"])
+        && request.resource.data.t == request.time;
+
+      allow delete: if false;
+    }
+
     match /invites/{code} {
       allow list: if false;
       allow get: if registered();
