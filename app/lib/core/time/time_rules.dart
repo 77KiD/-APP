@@ -87,7 +87,8 @@ class ServerClockReading {
   Duration get offset => serverNow.difference(deviceNow);
 }
 
-/// 上次連線時記下的伺服器時間、手機時間，以及 Android elapsedRealtime。
+/// 離線佇列送完之後記下的伺服器時間、手機牆鐘，以及 Android elapsedRealtime。
+/// 只留在手機上，不寫 `syncAnchors`。
 class TimeSample {
   const TimeSample({
     required this.serverNow,

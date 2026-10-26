@@ -8,6 +8,10 @@ abstract class TripRemote {
   /// 寫入 `clockProbes/{uid}.t` 後讀回，並用 [deviceNow] 算出時間差。
   Future<ServerClockReading> readServerClock(Future<DateTime> Function() deviceNow);
 
+  /// 等已經交給遠端的寫入送完。沒有離線佇列的實作直接返回。
+  /// 本機時鐘樣本要等它完成才更新。客戶端不寫 `syncAnchors`。
+  Future<void> flushPendingWrites();
+
   Future<void> upsertTrip(Trip trip);
 
   Future<Trip?> fetchTrip(String id);

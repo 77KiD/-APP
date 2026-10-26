@@ -54,6 +54,10 @@ abstract final class ItineraryCachePolicy {
   static ItineraryDay purgeDay(ItineraryDay day, DateTime now) {
     return day.copy(
       spots: [for (final spot in day.spots) purgeSpot(spot, now)],
+      setBackupStops: true,
+      backupStops: day.backupStops == null
+          ? null
+          : [for (final spot in day.backupStops!) purgeSpot(spot, now)],
     );
   }
 
@@ -263,28 +267,35 @@ abstract final class TripCodec {
     );
   }
 
-  static Map<String, dynamic> dayToMap(ItineraryDay day) => {
-    FirestoreSchema.date: day.date,
-    FirestoreSchema.stops: [for (final spot in day.spots) spotToMap(spot)],
-    FirestoreSchema.backupStops: const <Map<String, dynamic>>[],
-    FirestoreSchema.clientSavedAt: _iso(day.updatedAt),
-    FirestoreSchema.updatedBy: day.authorId,
-    FirestoreSchema.updatedAt: _iso(day.updatedAt),
-    FirestoreSchema.tripId: day.tripId,
-  };
+  static Map<String, dynamic> dayToMap(ItineraryDay day) {
+    final map = <String, dynamic>{
+      FirestoreSchema.date: day.date,
+      FirestoreSchema.stops: [for (final spot in day.spots) spotToMap(spot)],
+      FirestoreSchema.clientSavedAt: _iso(day.updatedAt),
+      FirestoreSchema.updatedBy: day.authorId,
+      FirestoreSchema.updatedAt: _iso(day.updatedAt),
+      FirestoreSchema.tripId: day.tripId,
+      LocalOnlyFields.replaceBackupStops: day.replaceBackupStops,
+    };
+    final backups = day.backupStops;
+    if (backups != null) {
+      map[FirestoreSchema.backupStops] = [
+        for (final spot in backups) spotToMap(spot),
+      ];
+    }
+    return map;
+  }
 
   static ItineraryDay dayFromMap(Map<String, dynamic> map) {
     final spots =
         map[FirestoreSchema.stops] ?? map[LocalOnlyFields.legacySpots];
+    final hasBackups = map.containsKey(FirestoreSchema.backupStops);
     return ItineraryDay(
       tripId: _string(map[FirestoreSchema.tripId]),
       date: _string(map[FirestoreSchema.date]),
-      spots: spots is List
-          ? [
-              for (final spot in spots)
-                if (spot is Map) spotFromMap(Map<String, dynamic>.from(spot)),
-            ]
-          : const [],
+      spots: _spotList(spots),
+      backupStops: hasBackups ? _spotList(map[FirestoreSchema.backupStops]) : null,
+      replaceBackupStops: map[LocalOnlyFields.replaceBackupStops] == true,
       updatedAt: _requiredInstant(
         map[FirestoreSchema.clientSavedAt] ?? map[FirestoreSchema.updatedAt],
       ),
@@ -292,6 +303,14 @@ abstract final class TripCodec {
         map[FirestoreSchema.updatedBy] ?? map[LocalOnlyFields.authorId],
       ),
     );
+  }
+
+  static List<ItinerarySpot> _spotList(Object? raw) {
+    if (raw is! List) return const [];
+    return [
+      for (final spot in raw)
+        if (spot is Map) spotFromMap(Map<String, dynamic>.from(spot)),
+    ];
   }
 
   static Map<String, dynamic> revisionToMap(ItineraryRevision revision) => {

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:group_trip/core/time/time_rules.dart';
 import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/features/trip/data/firestore_paths.dart';
+import 'package:group_trip/features/trip/domain/itinerary_day_write.dart';
 import 'package:group_trip/features/trip/domain/trip_codec.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/features/trip/domain/trip_policy.dart';
@@ -52,6 +53,11 @@ class FirestoreTripRemote implements TripRemote {
         deviceNow: device,
       );
     });
+  }
+
+  @override
+  Future<void> flushPendingWrites() {
+    return _guard(() => _firestore.waitForPendingWrites());
   }
 
   @override
@@ -301,23 +307,37 @@ class FirestoreTripRemote implements TripRemote {
     });
   }
 
+  /// 只寫有變動的欄位。沒有 [ItineraryDay.replaceBackupStops] 的更新不會帶
+  /// `backupStops`，伺服器上的備選清單維持原樣。建立當天文件時才補上空清單。
   @override
   Future<void> upsertItineraryDay(ItineraryDay day) {
     return _guard(() async {
-      await _trips
+      final ref = _trips
           .doc(day.tripId)
           .collection(FirestorePaths.itinerary)
-          .doc(day.date)
-          .set({
-            FirestoreSchema.date: day.date,
-            FirestoreSchema.stops: [
-              for (final spot in day.spots) TripCodec.spotToMap(spot),
-            ],
-            FirestoreSchema.backupStops: const <Map<String, dynamic>>[],
-            FirestoreSchema.clientSavedAt: _timestamp(day.updatedAt),
-            FirestoreSchema.updatedBy: day.authorId,
-            FirestoreSchema.updatedAt: FieldValue.serverTimestamp(),
-          });
+          .doc(day.date);
+      final snap = await ref.get();
+      final data = snap.data();
+      final existing = data == null
+          ? null
+          : TripCodec.dayFromMap({
+              ..._normalize(data),
+              FirestoreSchema.tripId: day.tripId,
+            });
+      final patch = ItineraryDayWrite.changedFields(
+        existing: existing,
+        incoming: day,
+      );
+      if (patch.isEmpty) return;
+      final payload = <String, dynamic>{
+        for (final entry in patch.entries)
+          entry.key: _encodeItineraryValue(entry.key, entry.value),
+      };
+      if (existing == null) {
+        await ref.set(payload);
+      } else {
+        await ref.update(payload);
+      }
     });
   }
 
@@ -505,6 +525,12 @@ class FirestoreTripRemote implements TripRemote {
     return Timestamp.fromDate(
       reading.serverNow.toUtc().add(const Duration(hours: 1)),
     );
+  }
+
+  Object? _encodeItineraryValue(String key, Object? value) {
+    if (key == FirestoreSchema.updatedAt) return FieldValue.serverTimestamp();
+    if (value is DateTime) return Timestamp.fromDate(value.toUtc());
+    return value;
   }
 
   Timestamp? _timestamp(DateTime? value) =>
