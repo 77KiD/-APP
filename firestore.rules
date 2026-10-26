@@ -208,11 +208,12 @@ service cloud.firestore {
         && request.time < data.createdAt + duration.value(1, 'h');
     }
 
-    // Codes created before invitesResetAt are dead, including officer codes.
-    // Null means the trip has never closed invites. Comparison is >= so a code
-    // minted in a later request (createdAt == that request's request.time) still works.
-    function inviteAfterReset(invite, trip) {
-      return trip.invitesResetAt == null
+    // invitesResetAt applies only to codes minted by a regular member.
+    // Leader and deputy codes ignore the cutoff and live until their own hour.
+    // creatorRole is the role at mint time, not the creator's role at join time.
+    function memberCodeSurvivesReset(invite, trip) {
+      return invite.creatorRole != "member"
+        || trip.invitesResetAt == null
         || invite.createdAt >= trip.invitesResetAt;
     }
 
@@ -222,8 +223,9 @@ service cloud.firestore {
       return code is string
         && exists(invitePath(code))
         && invite.tripId == tripId
+        && invite.creatorRole in ["leader", "deputy", "member"]
         && inviteStillValid(invite)
-        && inviteAfterReset(invite, trip);
+        && memberCodeSurvivesReset(invite, trip);
     }
 
     // invitesOpen defaults to true: any member may mint. After a leader or deputy
@@ -372,9 +374,10 @@ service cloud.firestore {
       allow create: if registered()
         && code.matches('^[A-Za-z0-9]{8,12}$')
         && request.resource.data.keys().hasOnly([
-          "tripId", "tripTitle", "createdBy", "active", "expiresAt", "createdAt"
+          "tripId", "tripTitle", "createdBy", "creatorRole", "active", "expiresAt", "createdAt"
         ])
         && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.creatorRole == get(memberPath(request.resource.data.tripId, request.auth.uid)).data.role
         && request.resource.data.active == true
         && request.resource.data.createdAt == request.time
         && expiresOneServerHourFromNow(request.resource.data.expiresAt)
@@ -383,11 +386,12 @@ service cloud.firestore {
 
       allow update: if isLeaderOrDeputy(resource.data.tripId)
         && request.resource.data.keys().hasOnly([
-          "tripId", "tripTitle", "createdBy", "active", "expiresAt", "createdAt"
+          "tripId", "tripTitle", "createdBy", "creatorRole", "active", "expiresAt", "createdAt"
         ])
         && request.resource.data.tripId == resource.data.tripId
         && request.resource.data.tripTitle == resource.data.tripTitle
         && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.creatorRole == resource.data.creatorRole
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.expiresAt == resource.data.expiresAt
         && resource.data.active == true
@@ -463,8 +467,8 @@ service cloud.firestore {
             && request.resource.data.endedAt == request.time
           )
           || (
-            // Closing stamps invitesResetAt to this request's server time and
-            // kills every code created before it. Reopening must leave that stamp.
+            // Closing stamps invitesResetAt. That cutoff kills only member-created
+            // codes. Reopening must leave the stamp so those codes stay dead.
             isLeaderOrDeputy(tripId)
             && changedKeys().hasOnly(["invitesOpen", "invitesResetAt", "updatedAt"])
             && (
