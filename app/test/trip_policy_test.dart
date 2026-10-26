@@ -88,6 +88,30 @@ void main() {
       TripPolicy.canIssueInvite(role: MemberRole.captain, publicInvite: false),
       isTrue,
     );
+    expect(TripPolicy.canTogglePublicInvite(MemberRole.captain), isTrue);
+    expect(TripPolicy.canTogglePublicInvite(MemberRole.viceCaptain), isTrue);
+    expect(TripPolicy.canTogglePublicInvite(MemberRole.member), isFalse);
+    expect(
+      TripPolicy.memberInviteBlocked(
+        publicInvite: false,
+        issuerRole: MemberRole.member,
+      ),
+      isTrue,
+    );
+    expect(
+      TripPolicy.memberInviteBlocked(
+        publicInvite: false,
+        issuerRole: MemberRole.viceCaptain,
+      ),
+      isFalse,
+    );
+    expect(
+      TripPolicy.memberInviteBlocked(
+        publicInvite: true,
+        issuerRole: MemberRole.member,
+      ),
+      isFalse,
+    );
     final expires = TripPolicy.inviteExpiresAt(now);
     expect(
       TripPolicy.isInviteExpired(

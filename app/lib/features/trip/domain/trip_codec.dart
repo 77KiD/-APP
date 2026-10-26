@@ -167,6 +167,7 @@ abstract final class TripCodec {
     'code': invite.code,
     'tripId': invite.tripId,
     'createdBy': invite.createdBy,
+    'issuerRole': invite.issuerRole.wire,
     'createdAt': invite.createdAt.toUtc().toIso8601String(),
     'expiresAt': invite.expiresAt.toUtc().toIso8601String(),
   };
@@ -176,6 +177,7 @@ abstract final class TripCodec {
       code: code ?? '${map['code']}',
       tripId: '${map['tripId']}',
       createdBy: '${map['createdBy'] ?? ''}',
+      issuerRole: MemberRole.parse('${map['issuerRole'] ?? ''}'),
       createdAt: _requiredInstant(map['createdAt']),
       expiresAt: _requiredInstant(map['expiresAt']),
     );

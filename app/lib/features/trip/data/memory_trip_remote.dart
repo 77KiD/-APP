@@ -87,6 +87,7 @@ class MemoryTripRemote implements TripRemote {
       code: code,
       tripId: invite.tripId,
       createdBy: invite.createdBy,
+      issuerRole: invite.issuerRole,
       createdAt: invite.createdAt.toUtc(),
       expiresAt: invite.expiresAt.toUtc(),
     );
@@ -116,6 +117,13 @@ class MemoryTripRemote implements TripRemote {
       throw InviteExpiredException();
     }
     final tripId = invite.tripId;
+    final tripForInvite = database.trips[tripId]!;
+    if (TripPolicy.memberInviteBlocked(
+      publicInvite: tripForInvite.publicInvite,
+      issuerRole: invite.issuerRole,
+    )) {
+      throw InviteClosedException();
+    }
     final tripMembers = database.members.putIfAbsent(tripId, () => {});
     if (tripMembers.containsKey(member.userId)) throw AlreadyMemberException();
     final saved = TripMember(

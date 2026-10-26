@@ -116,6 +116,19 @@ abstract final class TripPolicy {
     return role == MemberRole.captain || role == MemberRole.viceCaptain;
   }
 
+  static bool canTogglePublicInvite(MemberRole? role) =>
+      role == MemberRole.captain || role == MemberRole.viceCaptain;
+
+  /// 公開邀請關掉時，一般成員產生的碼立刻不能用。隊長與副隊長的碼不受影響。
+  /// 再打開公開邀請後，還沒滿 1 小時的一般成員碼可以恢復使用。
+  static bool memberInviteBlocked({
+    required bool publicInvite,
+    required MemberRole issuerRole,
+  }) {
+    if (publicInvite) return false;
+    return issuerRole == MemberRole.member;
+  }
+
   /// 有副隊長，或 2–4 人團：30 分鐘過期。
   /// 5–7 人且沒有副隊長：不過期。其餘情況（含 8 人以上還沒有副隊長）仍是 30 分鐘。
   static DateTime? requestExpiresAt({

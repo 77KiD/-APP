@@ -120,6 +120,7 @@ class TripLocalStore {
           code: code,
           tripId: invite.tripId,
           createdBy: invite.createdBy,
+          issuerRole: invite.issuerRole,
           createdAt: invite.createdAt,
           expiresAt: invite.expiresAt,
         ),

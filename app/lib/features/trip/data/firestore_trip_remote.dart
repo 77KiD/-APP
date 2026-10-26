@@ -101,6 +101,7 @@ class FirestoreTripRemote implements TripRemote {
           code: code,
           tripId: invite.tripId,
           createdBy: invite.createdBy,
+          issuerRole: invite.issuerRole,
           createdAt: invite.createdAt,
           expiresAt: invite.expiresAt,
         ),
@@ -137,6 +138,22 @@ class FirestoreTripRemote implements TripRemote {
     final now = await serverNow();
     if (TripPolicy.isInviteExpired(record.expiresAt, now)) {
       throw InviteExpiredException();
+    }
+    // 非成員讀不到旅程時，改由安全規則拒絕。讀得到就先在用戶端擋下。
+    bool? publicInvite;
+    try {
+      final tripSnap = await _trips.doc(tripId).get();
+      final raw = tripSnap.data()?['publicInvite'];
+      if (raw is bool) publicInvite = raw;
+    } on FirebaseException {
+      publicInvite = null;
+    }
+    if (publicInvite != null &&
+        TripPolicy.memberInviteBlocked(
+          publicInvite: publicInvite,
+          issuerRole: record.issuerRole,
+        )) {
+      throw InviteClosedException();
     }
     final existing = await _trips
         .doc(tripId)

@@ -64,7 +64,15 @@ class OfflineTripRepository implements TripRepository {
     );
     await local.saveTrip(trip);
     await local.saveMember(member);
-    await local.saveInvite(_issued(trip.inviteCode, trip.id, account.id, now));
+    await local.saveInvite(
+      _issued(
+        trip.inviteCode,
+        trip.id,
+        account.id,
+        MemberRole.captain,
+        now,
+      ),
+    );
     await local.enqueue(SyncOp(type: SyncOpType.upsertTrip, tripId: trip.id));
     await local.enqueue(
       SyncOp(
@@ -441,7 +449,13 @@ class OfflineTripRepository implements TripRepository {
       throw RoleChangeException(AppStrings.cannotIssueInvite);
     }
     final now = await _stamp();
-    final invite = _issued(await _freshCode(), trip.id, account.id, now);
+    final invite = _issued(
+      await _freshCode(),
+      trip.id,
+      account.id,
+      self.role,
+      now,
+    );
     await local.saveInvite(invite);
     await local.enqueue(
       SyncOp(
@@ -461,8 +475,8 @@ class OfflineTripRepository implements TripRepository {
   }) async {
     final trip = await getTrip(tripId);
     final self = await _self(tripId);
-    if (self.role != MemberRole.captain) {
-      throw RoleChangeException(AppStrings.onlyCaptainSetsPublicInvite);
+    if (!TripPolicy.canTogglePublicInvite(self.role)) {
+      throw RoleChangeException(AppStrings.onlyLeadersSetPublicInvite);
     }
     if (trip.publicInvite == enabled) return trip;
     final now = await _stamp();
@@ -686,12 +700,14 @@ class OfflineTripRepository implements TripRepository {
     String code,
     String tripId,
     String createdBy,
+    MemberRole issuerRole,
     DateTime createdAt,
   ) {
     return InviteRecord(
       code: code.trim().toUpperCase(),
       tripId: tripId,
       createdBy: createdBy,
+      issuerRole: issuerRole,
       createdAt: createdAt.toUtc(),
       expiresAt: TripPolicy.inviteExpiresAt(createdAt),
     );

@@ -38,6 +38,7 @@ void main() {
       code: 'AB2345',
       tripId: 't1',
       createdBy: 'u1',
+      issuerRole: MemberRole.captain,
       createdAt: trip.createdAt,
       expiresAt: trip.createdAt.add(const Duration(hours: 1)),
     );
@@ -45,9 +46,14 @@ void main() {
       'code',
       'tripId',
       'createdBy',
+      'issuerRole',
       'createdAt',
       'expiresAt',
     });
+    expect(
+      TripCodec.inviteFromMap(TripCodec.inviteToMap(invite)).issuerRole,
+      MemberRole.captain,
+    );
     expect(
       TripCodec.inviteFromMap(TripCodec.inviteToMap(invite)).expiresAt,
       invite.expiresAt,
