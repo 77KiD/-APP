@@ -1,0 +1,665 @@
+rules_version = '2';
+// Contract: docs/data-model.md. Anniversary math matches functions/src/age.ts.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath(userId) {
+      return /databases/$(database)/documents/users/$(userId);
+    }
+
+    function tripPath(tripId) {
+      return /databases/$(database)/documents/trips/$(tripId);
+    }
+
+    function memberPath(tripId, userId) {
+      return /databases/$(database)/documents/trips/$(tripId)/members/$(userId);
+    }
+
+    function invitePath(code) {
+      return /databases/$(database)/documents/invites/$(code);
+    }
+
+    function registered() {
+      return signedIn() && exists(userPath(request.auth.uid));
+    }
+
+    function isLeapYear(year) {
+      return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    }
+
+    // Feb 29 rolls to March 1 when the destination year is not a leap year.
+    function anniversary(birthdate, years) {
+      return birthdate.month() == 2 && birthdate.day() == 29 && !isLeapYear(birthdate.year() + years)
+        ? timestamp.date(birthdate.year() + years, 3, 1)
+        : timestamp.date(birthdate.year() + years, birthdate.month(), birthdate.day());
+    }
+
+    function isAtLeastYears(birthdate, years) {
+      return birthdate is timestamp && request.time >= anniversary(birthdate, years);
+    }
+
+    function isUtcMidnight(value) {
+      return value is timestamp
+        && value.hours() == 0
+        && value.minutes() == 0
+        && value.seconds() == 0
+        && value.nanos() == 0;
+    }
+
+    function actorIsMinor() {
+      return !isAtLeastYears(get(userPath(request.auth.uid)).data.birthdate, 18);
+    }
+
+    function isMember(tripId) {
+      return signedIn() && exists(memberPath(tripId, request.auth.uid));
+    }
+
+    function isLeader(tripId) {
+      return isMember(tripId)
+        && get(memberPath(tripId, request.auth.uid)).data.role == "leader";
+    }
+
+    function isLeaderOrDeputy(tripId) {
+      return isMember(tripId)
+        && get(memberPath(tripId, request.auth.uid)).data.role in ["leader", "deputy"];
+    }
+
+    function tripOpen(tripId) {
+      return get(tripPath(tripId)).data.status != "ended";
+    }
+
+    function validDisplayName(value) {
+      return value is string && value.size() >= 1 && value.size() <= 40;
+    }
+
+    function validPhoto(value) {
+      return value == null || (value is string && value.size() > 0 && value.size() <= 500);
+    }
+
+    function validTitle(value) {
+      return value is string && value.size() >= 1 && value.size() <= 60;
+    }
+
+    function validTimeZone(value) {
+      return value is string
+        && value.size() >= 1
+        && value.size() <= 64
+        && value.matches('^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$');
+    }
+
+    function validTransportNote(value) {
+      return value == null || (value is string && value.size() <= 200);
+    }
+
+    function validReturnFlight(value) {
+      return value == null || (
+        value is map
+        && value.keys().hasOnly(["summary", "flightNumber"])
+        && value.summary is string
+        && value.summary.size() >= 1
+        && value.summary.size() <= 120
+        && (value.flightNumber == null || (value.flightNumber is string && value.flightNumber.size() <= 20))
+      );
+    }
+
+    function validOptionalFutureTime(value) {
+      return value == null || (value is timestamp && value >= request.time);
+    }
+
+    function validClientSavedAt(value) {
+      return value is timestamp
+        && value <= request.time + duration.value(5, 'm')
+        && value >= request.time - duration.value(400, 'd');
+    }
+
+    function tripKeysOk(data) {
+      return data.keys().hasOnly([
+        "schemaVersion",
+        "title",
+        "leaderId",
+        "status",
+        "startDate",
+        "endDate",
+        "timeZone",
+        "expectedReturnAt",
+        "generalTransport",
+        "returnTransport",
+        "returnFlight",
+        "startedAt",
+        "endedAt",
+        "endReason",
+        "createdAt",
+        "updatedAt"
+      ]);
+    }
+
+    function validPlanning(data) {
+      return validTitle(data.title)
+        && data.startDate is string
+        && data.endDate is string
+        && data.startDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.endDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.startDate <= data.endDate
+        && validTimeZone(data.timeZone);
+    }
+
+    function endShapeOk(data) {
+      return (
+        data.status != "ended"
+        && data.endedAt == null
+        && data.endReason == null
+      ) || (
+        data.status == "ended"
+        && data.endedAt is timestamp
+        && data.endReason in ["leader_manual", "expected_return", "end_date"]
+      );
+    }
+
+    function startedShapeOk(data) {
+      return (data.status == "planning" && data.startedAt == null)
+        || (data.status == "active" && data.startedAt is timestamp)
+        || (data.status == "ended" && (data.startedAt == null || data.startedAt is timestamp));
+    }
+
+    function tripShapeOk(data) {
+      return tripKeysOk(data)
+        && data.schemaVersion == 1
+        && data.leaderId is string
+        && data.status in ["planning", "active", "ended"]
+        && validPlanning(data)
+        && validTransportNote(data.generalTransport)
+        && validTransportNote(data.returnTransport)
+        && validReturnFlight(data.returnFlight)
+        && (data.expectedReturnAt == null || data.expectedReturnAt is timestamp)
+        && endShapeOk(data)
+        && startedShapeOk(data)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function validMemberShape(data) {
+      return data.keys().hasOnly(["role", "isMinor", "displayName", "photoUrl", "inviteCode", "joinedAt"])
+        && data.role in ["leader", "deputy", "member"]
+        && data.isMinor is bool
+        && validDisplayName(data.displayName)
+        && validPhoto(data.photoUrl)
+        && (data.inviteCode == null || (data.inviteCode is string && data.inviteCode.matches('^[A-Za-z0-9]{8,12}$')))
+        && data.joinedAt is timestamp;
+    }
+
+    function inviteGrants(code, tripId) {
+      return code is string
+        && exists(invitePath(code))
+        && get(invitePath(code)).data.tripId == tripId
+        && get(invitePath(code)).data.active == true
+        && (
+          get(invitePath(code)).data.expiresAt == null
+          || get(invitePath(code)).data.expiresAt > request.time
+        );
+    }
+
+    function validPayload(type, payload) {
+      return payload is map && (
+        (
+          type == "expected_return_at"
+          && payload.keys().hasOnly(["expectedReturnAt"])
+          && validOptionalFutureTime(payload.expectedReturnAt)
+        ) || (
+          type == "general_transport"
+          && payload.keys().hasOnly(["generalTransport"])
+          && validTransportNote(payload.generalTransport)
+        ) || (
+          type == "return_transport"
+          && payload.keys().hasOnly(["returnTransport"])
+          && validTransportNote(payload.returnTransport)
+        ) || (
+          type == "return_flight"
+          && payload.keys().hasOnly(["returnFlight"])
+          && validReturnFlight(payload.returnFlight)
+        )
+      );
+    }
+
+    function validRequestShape(data) {
+      return data.keys().hasOnly([
+        "type", "status", "proposerId", "payload", "createdAt", "expiresAt", "decidedBy", "decidedAt"
+      ])
+        && data.type in ["expected_return_at", "general_transport", "return_transport", "return_flight"]
+        && data.status in ["pending", "approved", "rejected", "expired"]
+        && data.proposerId is string
+        && data.createdAt is timestamp
+        && (data.expiresAt == null || data.expiresAt is timestamp)
+        && (data.decidedBy == null || data.decidedBy is string)
+        && (data.decidedAt == null || data.decidedAt is timestamp);
+    }
+
+    function validLatLng(data) {
+      return (
+        data.latitude == null
+        && data.longitude == null
+        && data.coordinatesCachedAt == null
+      ) || (
+        data.latitude is number
+        && data.longitude is number
+        && data.latitude >= -90
+        && data.latitude <= 90
+        && data.longitude >= -180
+        && data.longitude <= 180
+        && data.coordinatesCachedAt is timestamp
+        && data.coordinatesCachedAt <= request.time + duration.value(5, 'm')
+        && data.coordinatesCachedAt >= request.time - duration.value(30, 'd')
+      );
+    }
+
+    match /users/{userId} {
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list: if false;
+
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          "birthdate", "displayName", "photoUrl", "createdAt", "updatedAt"
+        ])
+        && isUtcMidnight(request.resource.data.birthdate)
+        && isAtLeastYears(request.resource.data.birthdate, 13)
+        && validDisplayName(request.resource.data.displayName)
+        && validPhoto(request.resource.data.photoUrl)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          "birthdate", "displayName", "photoUrl", "createdAt", "updatedAt"
+        ])
+        && request.resource.data.birthdate == resource.data.birthdate
+        && validDisplayName(request.resource.data.displayName)
+        && validPhoto(request.resource.data.photoUrl)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+
+      match /syncAnchors/{deviceId} {
+        allow get, list: if signedIn() && request.auth.uid == userId;
+        allow create, update: if signedIn()
+          && request.auth.uid == userId
+          && deviceId.matches('^[A-Za-z0-9_-]{1,64}$')
+          && request.resource.data.keys().hasOnly([
+            "phoneWallClockAtSync", "elapsedRealtimeAtSyncMs", "updatedAt"
+          ])
+          && request.resource.data.phoneWallClockAtSync is timestamp
+          && request.resource.data.phoneWallClockAtSync >= request.time - duration.value(800, 'd')
+          && request.resource.data.phoneWallClockAtSync <= request.time + duration.value(800, 'd')
+          && request.resource.data.elapsedRealtimeAtSyncMs is int
+          && request.resource.data.elapsedRealtimeAtSyncMs >= 0
+          && request.resource.data.elapsedRealtimeAtSyncMs <= 3153600000000
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if signedIn() && request.auth.uid == userId;
+      }
+
+      match /tripRefs/{tripId} {
+        allow get, list: if registered() && request.auth.uid == userId;
+        allow create: if registered()
+          && request.auth.uid == userId
+          && tripId == request.resource.data.tripId
+          && request.resource.data.keys().hasOnly(["tripId", "role", "tripTitle", "updatedAt"])
+          && request.resource.data.role == get(memberPath(tripId, userId)).data.role
+          && validTitle(request.resource.data.tripTitle)
+          && request.resource.data.updatedAt == request.time;
+        allow update: if registered()
+          && request.auth.uid == userId
+          && request.resource.data.keys().hasOnly(["tripId", "role", "tripTitle", "updatedAt"])
+          && request.resource.data.tripId == tripId
+          && resource.data.tripId == tripId
+          && request.resource.data.role == get(memberPath(tripId, userId)).data.role
+          && validTitle(request.resource.data.tripTitle)
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if registered() && request.auth.uid == userId;
+      }
+    }
+
+    match /invites/{code} {
+      allow list: if false;
+      allow get: if registered();
+
+      allow create: if registered()
+        && code.matches('^[A-Za-z0-9]{8,12}$')
+        && request.resource.data.keys().hasOnly([
+          "tripId", "tripTitle", "createdBy", "active", "expiresAt", "createdAt"
+        ])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.active == true
+        && request.resource.data.createdAt == request.time
+        && (
+          request.resource.data.expiresAt == null
+          || (
+            request.resource.data.expiresAt is timestamp
+            && request.resource.data.expiresAt > request.time
+          )
+        )
+        && get(tripPath(request.resource.data.tripId)).data.leaderId == request.auth.uid
+        && request.resource.data.tripTitle == get(tripPath(request.resource.data.tripId)).data.title
+        && get(memberPath(request.resource.data.tripId, request.auth.uid)).data.role == "leader";
+
+      allow update: if registered()
+        && resource.data.createdBy == request.auth.uid
+        && get(tripPath(resource.data.tripId)).data.leaderId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          "tripId", "tripTitle", "createdBy", "active", "expiresAt", "createdAt"
+        ])
+        && request.resource.data.tripId == resource.data.tripId
+        && request.resource.data.tripTitle == resource.data.tripTitle
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.expiresAt == resource.data.expiresAt
+        && resource.data.active == true
+        && request.resource.data.active == false;
+
+      allow delete: if false;
+    }
+
+    match /trips/{tripId} {
+      allow list: if false;
+      allow get: if registered() && (
+        resource.data.leaderId == request.auth.uid || isMember(tripId)
+      );
+
+      allow create: if registered()
+        && request.auth.uid == request.resource.data.leaderId
+        && tripShapeOk(request.resource.data)
+        && request.resource.data.status == "planning"
+        && request.resource.data.startedAt == null
+        && request.resource.data.endedAt == null
+        && request.resource.data.endReason == null
+        && validOptionalFutureTime(request.resource.data.expectedReturnAt)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      // Diff the changed keys so a denied write does not have to prove every
+      // unchanged field. Expression budget is 1000 per evaluation.
+      allow update: if resource != null
+        && resource.data.status != "ended"
+        && registered()
+        && isMember(tripId)
+        && request.resource.data.updatedAt == request.time
+        && !changedKeys().hasAny(["schemaVersion", "leaderId", "createdAt"])
+        && (
+          (
+            changedKeys().hasOnly(["title", "startDate", "endDate", "timeZone", "updatedAt"])
+            && validPlanning(request.resource.data)
+          )
+          || (
+            isLeaderOrDeputy(tripId)
+            && changedKeys().hasOnly([
+              "title", "startDate", "endDate", "timeZone", "updatedAt",
+              "expectedReturnAt", "generalTransport", "returnTransport", "returnFlight"
+            ])
+            && (
+              !changedKeys().hasAny(["returnFlight"])
+              || resource.data.startedAt == null
+            )
+            && (
+              !changedKeys().hasAny(["expectedReturnAt"])
+              || validOptionalFutureTime(request.resource.data.expectedReturnAt)
+            )
+            && validPlanning(request.resource.data)
+            && validTransportNote(request.resource.data.generalTransport)
+            && validTransportNote(request.resource.data.returnTransport)
+            && validReturnFlight(request.resource.data.returnFlight)
+          )
+          || (
+            isLeader(tripId)
+            && changedKeys().hasOnly(["status", "startedAt", "updatedAt"])
+            && resource.data.status == "planning"
+            && request.resource.data.status == "active"
+            && resource.data.startedAt == null
+            && request.resource.data.startedAt == request.time
+          )
+          || (
+            isLeaderOrDeputy(tripId)
+            && changedKeys().hasOnly(["status", "endReason", "endedAt", "updatedAt"])
+            && request.resource.data.status == "ended"
+            && request.resource.data.endReason == "leader_manual"
+            && request.resource.data.endedAt == request.time
+          )
+        );
+
+      allow delete: if false;
+
+      match /members/{memberId} {
+        allow get, list: if isMember(tripId);
+
+        allow create: if registered()
+          && request.auth.uid == memberId
+          && validMemberShape(request.resource.data)
+          && request.resource.data.joinedAt == request.time
+          && request.resource.data.isMinor == actorIsMinor()
+          && (
+            (
+              request.resource.data.role == "leader"
+              && request.resource.data.inviteCode == null
+              && get(tripPath(tripId)).data.leaderId == request.auth.uid
+            ) || (
+              request.resource.data.role == "member"
+              && inviteGrants(request.resource.data.inviteCode, tripId)
+            )
+          );
+
+        allow update: if registered()
+          && request.auth.uid == memberId
+          && validMemberShape(request.resource.data)
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.inviteCode == resource.data.inviteCode
+          && request.resource.data.joinedAt == resource.data.joinedAt
+          && request.resource.data.isMinor == actorIsMinor();
+
+        allow update: if isLeader(tripId)
+          && memberId != request.auth.uid
+          && resource.data.role != "leader"
+          && request.resource.data.role in ["deputy", "member"]
+          && validMemberShape(request.resource.data)
+          && request.resource.data.isMinor == resource.data.isMinor
+          && request.resource.data.displayName == resource.data.displayName
+          && request.resource.data.photoUrl == resource.data.photoUrl
+          && request.resource.data.inviteCode == resource.data.inviteCode
+          && request.resource.data.joinedAt == resource.data.joinedAt;
+
+        allow delete: if false;
+      }
+
+      match /requests/{requestId} {
+        allow get, list: if isMember(tripId);
+
+        allow create: if isMember(tripId)
+          && tripOpen(tripId)
+          && validRequestShape(request.resource.data)
+          && validPayload(request.resource.data.type, request.resource.data.payload)
+          && request.resource.data.status == "pending"
+          && request.resource.data.proposerId == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.decidedBy == null
+          && request.resource.data.decidedAt == null
+          && (
+            request.resource.data.expiresAt == null
+            || (
+              request.resource.data.expiresAt > request.time
+              && request.resource.data.expiresAt <= request.time + duration.value(31, 'm')
+            )
+          );
+
+        allow update: if isLeaderOrDeputy(tripId)
+          && tripOpen(tripId)
+          && validRequestShape(request.resource.data)
+          && resource.data.status == "pending"
+          && request.resource.data.status in ["approved", "rejected"]
+          && request.resource.data.decidedBy == request.auth.uid
+          && request.resource.data.decidedAt == request.time
+          && request.resource.data.type == resource.data.type
+          && request.resource.data.proposerId == resource.data.proposerId
+          && request.resource.data.payload == resource.data.payload
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.expiresAt == resource.data.expiresAt;
+
+        allow delete: if false;
+      }
+
+      match /itinerary/{dayId} {
+        allow get, list: if isMember(tripId);
+
+        allow create: if isMember(tripId)
+          && tripOpen(tripId)
+          && dayId.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.keys().hasOnly([
+            "date", "stops", "backupStops", "clientSavedAt", "updatedBy", "updatedAt"
+          ])
+          && request.resource.data.date == dayId
+          && request.resource.data.stops is list
+          && request.resource.data.stops.size() <= 5
+          && request.resource.data.backupStops is list
+          && request.resource.data.backupStops.size() <= 30
+          && validClientSavedAt(request.resource.data.clientSavedAt)
+          && request.resource.data.updatedBy == request.auth.uid
+          && request.resource.data.updatedAt == request.time;
+
+        allow update: if isMember(tripId)
+          && tripOpen(tripId)
+          && request.resource.data.keys().hasOnly([
+            "date", "stops", "backupStops", "clientSavedAt", "updatedBy", "updatedAt"
+          ])
+          && request.resource.data.date == dayId
+          && resource.data.date == dayId
+          && request.resource.data.stops is list
+          && request.resource.data.stops.size() <= 5
+          && request.resource.data.backupStops is list
+          && request.resource.data.backupStops.size() <= 30
+          && validClientSavedAt(request.resource.data.clientSavedAt)
+          && request.resource.data.clientSavedAt >= resource.data.clientSavedAt
+          && request.resource.data.updatedBy == request.auth.uid
+          && request.resource.data.updatedAt == request.time;
+
+        allow delete: if false;
+      }
+
+      match /itineraryHistory/{historyId} {
+        allow get, list: if isMember(tripId);
+        allow create: if isMember(tripId)
+          && request.resource.data.keys().hasOnly([
+            "dayId", "snapshot", "clientSavedAt", "updatedBy", "recordedBy", "outcome", "createdAt"
+          ])
+          && request.resource.data.dayId is string
+          && request.resource.data.dayId.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.snapshot is map
+          && validClientSavedAt(request.resource.data.clientSavedAt)
+          && request.resource.data.updatedBy is string
+          && request.resource.data.updatedBy.size() > 0
+          && request.resource.data.updatedBy.size() <= 128
+          && request.resource.data.recordedBy == request.auth.uid
+          && request.resource.data.outcome in ["superseded", "lost"]
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+
+      match /places/{placeId} {
+        allow get, list: if isMember(tripId);
+
+        allow create: if isMember(tripId)
+          && tripOpen(tripId)
+          && request.resource.data.keys().hasOnly([
+            "place_id", "name", "proposedBy", "latitude", "longitude",
+            "coordinatesCachedAt", "replacesPlaceId", "kind", "createdAt", "updatedAt"
+          ])
+          && request.resource.data.place_id is string
+          && request.resource.data.place_id.size() >= 1
+          && request.resource.data.place_id.size() <= 300
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 1
+          && request.resource.data.name.size() <= 120
+          && request.resource.data.proposedBy == request.auth.uid
+          && validLatLng(request.resource.data)
+          && (request.resource.data.replacesPlaceId == null
+            || (request.resource.data.replacesPlaceId is string
+              && request.resource.data.replacesPlaceId.size() <= 128))
+          && request.resource.data.kind in ["proposal", "alternative"]
+          && (request.resource.data.kind == "proposal" || request.resource.data.replacesPlaceId is string)
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time;
+
+        allow update: if isMember(tripId)
+          && tripOpen(tripId)
+          && request.resource.data.keys().hasOnly([
+            "place_id", "name", "proposedBy", "latitude", "longitude",
+            "coordinatesCachedAt", "replacesPlaceId", "kind", "createdAt", "updatedAt"
+          ])
+          && request.resource.data.place_id == resource.data.place_id
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 1
+          && request.resource.data.name.size() <= 120
+          && request.resource.data.proposedBy == resource.data.proposedBy
+          && validLatLng(request.resource.data)
+          && (request.resource.data.replacesPlaceId == null
+            || (request.resource.data.replacesPlaceId is string
+              && request.resource.data.replacesPlaceId.size() <= 128))
+          && request.resource.data.kind in ["proposal", "alternative"]
+          && (request.resource.data.kind == "proposal" || request.resource.data.replacesPlaceId is string)
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time;
+
+        allow delete: if false;
+
+        match /votes/{voterId} {
+          allow get, list: if isMember(tripId);
+          allow create, update: if isMember(tripId)
+            && tripOpen(tripId)
+            && voterId == request.auth.uid
+            && request.resource.data.keys().hasOnly(["value", "updatedAt"])
+            && request.resource.data.value in [-1, 0, 1]
+            && request.resource.data.updatedAt == request.time;
+          allow delete: if false;
+        }
+      }
+
+      match /locations/{memberId} {
+        allow get, list: if isMember(tripId) && tripOpen(tripId);
+        allow create, update: if isMember(tripId)
+          && tripOpen(tripId)
+          && memberId == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            "latitude", "longitude", "sentAt", "receivedAt", "photoUrl"
+          ])
+          && request.resource.data.latitude is number
+          && request.resource.data.longitude is number
+          && request.resource.data.latitude >= -90
+          && request.resource.data.latitude <= 90
+          && request.resource.data.longitude >= -180
+          && request.resource.data.longitude <= 180
+          && request.resource.data.sentAt is timestamp
+          && request.resource.data.sentAt <= request.time + duration.value(2, 'm')
+          && request.resource.data.sentAt >= request.time - duration.value(7, 'd')
+          && request.resource.data.receivedAt == request.time
+          && validPhoto(request.resource.data.photoUrl);
+        allow delete: if isMember(tripId)
+          && tripOpen(tripId)
+          && memberId == request.auth.uid;
+      }
+
+      // #14 fills in writes. Members may already subscribe.
+      match /handover/{handoverId} {
+        allow read: if isMember(tripId);
+        allow write: if false;
+      }
+
+      match /soloNotices/{noticeId} {
+        allow read: if isMember(tripId);
+        allow write: if false;
+      }
+    }
+  }
+}
