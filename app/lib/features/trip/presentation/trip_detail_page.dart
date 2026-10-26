@@ -293,8 +293,9 @@ class _TripDetailPageState extends State<TripDetailPage> {
                   ),
                   Text(
                     TripPolicy.memberInviteBlocked(
-                      publicInvite: trip.publicInvite,
+                      invitesResetAt: trip.invitesResetAt,
                       issuerRole: invite.issuerRole,
+                      createdAt: invite.createdAt,
                     )
                         ? AppStrings.inviteClosedByPublicInvite
                         : _deviceNow == null

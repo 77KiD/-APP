@@ -16,6 +16,14 @@ void main() {
     expect(stamped, DateTime.utc(2026, 10, 26, 12, 0, 1));
   });
 
+  test('clock probe 的時間差是伺服器時間減手機牆鐘', () {
+    final reading = ServerClockReading(
+      serverNow: DateTime.utc(2026, 10, 26, 12),
+      deviceNow: DateTime.utc(2026, 10, 26, 13),
+    );
+    expect(reading.offset, const Duration(hours: -1));
+  });
+
   test('離線期間重開機改用手機時間加上上次的時間差', () {
     final sample = TimeSample(
       serverNow: DateTime.utc(2026, 10, 26, 12, 5),

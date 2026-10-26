@@ -1,3 +1,4 @@
+import 'package:group_trip/core/time/time_rules.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/features/trip/domain/trip_policy.dart';
 import 'package:group_trip/features/trip/domain/trip_repository.dart';
@@ -28,6 +29,14 @@ class MemoryTripRemote implements TripRemote {
 
   @override
   Future<DateTime> serverNow() async => database.clock.toUtc();
+
+  @override
+  Future<ServerClockReading> readServerClock(
+    Future<DateTime> Function() deviceNow,
+  ) async {
+    final device = (await deviceNow()).toUtc();
+    return ServerClockReading(serverNow: database.clock.toUtc(), deviceNow: device);
+  }
 
   @override
   Future<void> upsertTrip(Trip trip) async {
@@ -88,6 +97,8 @@ class MemoryTripRemote implements TripRemote {
       tripId: invite.tripId,
       createdBy: invite.createdBy,
       issuerRole: invite.issuerRole,
+      tripTitle: invite.tripTitle,
+      active: invite.active,
       createdAt: invite.createdAt.toUtc(),
       expiresAt: invite.expiresAt.toUtc(),
     );
@@ -119,8 +130,9 @@ class MemoryTripRemote implements TripRemote {
     final tripId = invite.tripId;
     final tripForInvite = database.trips[tripId]!;
     if (TripPolicy.memberInviteBlocked(
-      publicInvite: tripForInvite.publicInvite,
+      invitesResetAt: tripForInvite.invitesResetAt,
       issuerRole: invite.issuerRole,
+      createdAt: invite.createdAt,
     )) {
       throw InviteClosedException();
     }
@@ -134,6 +146,7 @@ class MemoryTripRemote implements TripRemote {
       role: MemberRole.member,
       isMinor: member.isMinor,
       joinedAt: member.joinedAt,
+      inviteCode: invite.code,
     );
     tripMembers[saved.userId] = saved;
     final trip = database.trips[tripId]!;

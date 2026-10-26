@@ -1,4 +1,5 @@
 import 'package:group_trip/core/time/time_rules.dart';
+import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/features/auth/domain/auth_models.dart';
 import 'package:group_trip/l10n/app_strings.dart';
 
@@ -38,6 +39,8 @@ class SignUpFlow {
       return SignUpOutcome.success(account);
     } on EmailInUseFailure catch (failure) {
       return SignUpOutcome.failure(failure);
+    } on ProfileWriteFailure catch (failure) {
+      return SignUpOutcome.failure(failure);
     }
   }
 
@@ -57,7 +60,7 @@ class SignUpFlow {
     if (name.isEmpty) {
       return const InvalidDisplayNameFailure(AppStrings.emptyName);
     }
-    if (name.length > 30) {
+    if (name.length > FirestoreSchema.maxDisplayNameLength) {
       return const InvalidDisplayNameFailure(AppStrings.nameTooLong);
     }
     if (CalendarDate.parse(birthday) == null) {

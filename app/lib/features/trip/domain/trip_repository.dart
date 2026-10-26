@@ -1,8 +1,12 @@
+import 'package:group_trip/core/time/time_rules.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/features/trip/domain/trip_policy.dart';
 
 abstract class TripRemote {
   Future<DateTime> serverNow();
+
+  /// 寫入 `clockProbes/{uid}.t` 後讀回，並用 [deviceNow] 算出時間差。
+  Future<ServerClockReading> readServerClock(Future<DateTime> Function() deviceNow);
 
   Future<void> upsertTrip(Trip trip);
 
