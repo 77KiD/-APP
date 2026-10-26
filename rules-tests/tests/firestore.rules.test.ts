@@ -78,6 +78,34 @@ function tripBody(leaderId: string) {
     startedAt: null,
     endedAt: null,
     endReason: null,
+    invitesOpen: true,
+    invitesResetAt: null,
+  };
+}
+
+function aboutOneHourFromNow(): Timestamp {
+  return Timestamp.fromMillis(Date.now() + 58 * 60 * 1000);
+}
+
+function creatorRoleFor(uid: string): "leader" | "deputy" | "member" {
+  if (uid === deputy) return "deputy";
+  if (uid === member) return "member";
+  return "leader";
+}
+
+function inviteDoc(
+  createdBy: string,
+  expiresAt: Timestamp | null = aboutOneHourFromNow(),
+  creatorRole: "leader" | "deputy" | "member" = creatorRoleFor(createdBy),
+) {
+  return {
+    tripId,
+    tripTitle: "京都自由行",
+    createdBy,
+    creatorRole,
+    active: true,
+    expiresAt,
+    createdAt: serverTimestamp(),
   };
 }
 
@@ -239,16 +267,7 @@ describe("trip membership isolation", () => {
     await assertSucceeds(setDoc(doc(db(host), `trips/${tripId}`), newTrip(host)));
     await assertSucceeds(getDoc(doc(db(host), `trips/${tripId}`)));
     await assertSucceeds(setDoc(doc(db(host), `trips/${tripId}/members/${host}`), leaderMember("隊長")));
-    await assertSucceeds(
-      setDoc(doc(db(host), "invites/JOINCODE1"), {
-        tripId,
-        tripTitle: "京都自由行",
-        createdBy: host,
-        active: true,
-        expiresAt: null,
-        createdAt: serverTimestamp(),
-      }),
-    );
+    await assertSucceeds(setDoc(doc(db(host), "invites/JOINCODE1"), inviteDoc(host)));
     await assertSucceeds(
       setDoc(doc(db(host), `users/${host}/tripRefs/${tripId}`), {
         tripId,
@@ -312,25 +331,10 @@ describe("trip membership isolation", () => {
     await assertSucceeds(setDoc(doc(db(host), `trips/${tripId}`), newTrip(host)));
     await assertSucceeds(setDoc(doc(db(host), `trips/${tripId}/members/${host}`), leaderMember("隊長")));
     await assertFails(
-      setDoc(doc(db(host), "invites/PASTCODE"), {
-        tripId,
-        tripTitle: "京都自由行",
-        createdBy: host,
-        active: true,
-        expiresAt: Timestamp.fromDate(new Date("2020-01-01T00:00:00Z")),
-        createdAt: serverTimestamp(),
-      }),
+      setDoc(doc(db(host), "invites/PASTCODE"), inviteDoc(host, Timestamp.fromDate(new Date("2020-01-01T00:00:00Z")))),
     );
-    await assertSucceeds(
-      setDoc(doc(db(host), "invites/JOINCODE1"), {
-        tripId,
-        tripTitle: "京都自由行",
-        createdBy: host,
-        active: true,
-        expiresAt: null,
-        createdAt: serverTimestamp(),
-      }),
-    );
+    await assertFails(setDoc(doc(db(host), "invites/NULLCODE"), inviteDoc(host, null)));
+    await assertSucceeds(setDoc(doc(db(host), "invites/JOINCODE1"), inviteDoc(host)));
     await assertSucceeds(
       updateDoc(doc(db(host), "invites/JOINCODE1"), { active: false }),
     );
@@ -339,6 +343,7 @@ describe("trip membership isolation", () => {
         tripId,
         tripTitle: "京都自由行",
         createdBy: host,
+        creatorRole: "leader",
         active: true,
         expiresAt: Timestamp.fromDate(new Date("2020-01-01T00:00:00Z")),
         createdAt: Timestamp.fromDate(new Date("2020-01-01T00:00:00Z")),
@@ -797,5 +802,230 @@ describe("places, votes, sync anchors", () => {
     await assertSucceeds(getDocs(collection(db(member), `trips/${tripId}/soloNotices`)));
     await assertFails(setDoc(doc(db(leader), `trips/${tripId}/soloNotices/s1`), { memberId: leader }));
     await assertFails(getDocs(collection(db(outsider), `trips/${tripId}/handover`)));
+  });
+});
+
+describe("invite expiry and invitesOpen", () => {
+  beforeEach(async () => {
+    await seedOpenTrip();
+  });
+
+  async function register(uid: string): Promise<void> {
+    await assertSucceeds(setDoc(doc(db(uid), `users/${uid}`), profile(utcMidnightYearsAgo(30), uid)));
+  }
+
+  function join(uid: string, code: string) {
+    return setDoc(doc(db(uid), `trips/${tripId}/members/${uid}`), joiningMember(uid, code, false));
+  }
+
+  it("lets every member mint a code, and one code can be used by several people", async () => {
+    await assertSucceeds(setDoc(doc(db(member), "invites/MEMBERCD1"), inviteDoc(member)));
+    await assertSucceeds(setDoc(doc(db(deputy), "invites/DEPUTYCD1"), inviteDoc(deputy)));
+    await assertSucceeds(setDoc(doc(db(leader), "invites/LEADERCD1"), inviteDoc(leader)));
+    const minted = await assertSucceeds(getDoc(doc(db(leader), "invites/MEMBERCD1")));
+    assert.equal(minted.get("creatorRole"), "member");
+    await assertFails(setDoc(doc(db(outsider), "invites/OUTSIDER1"), inviteDoc(outsider)));
+    await assertFails(setDoc(doc(db(member), "invites/FAKELEAD1"), inviteDoc(member, aboutOneHourFromNow(), "leader")));
+    await assertFails(setDoc(doc(db(deputy), "invites/FAKEMEMB1"), inviteDoc(deputy, aboutOneHourFromNow(), "member")));
+    await assertFails(updateDoc(doc(db(member), "invites/MEMBERCD1"), { active: false }));
+
+    await register("guest-a");
+    await register("guest-b");
+    await register("guest-c");
+    await assertSucceeds(join("guest-a", "MEMBERCD1"));
+    await assertSucceeds(join("guest-b", "MEMBERCD1"));
+    await assertSucceeds(join("guest-c", "DEPUTYCD1"));
+
+    const tooLate = Timestamp.fromMillis(Date.now() + 61 * 60 * 1000);
+    const tooSoon = Timestamp.fromMillis(Date.now() + 30 * 60 * 1000);
+    await assertFails(setDoc(doc(db(member), "invites/TOOLATE01"), inviteDoc(member, tooLate)));
+    await assertFails(setDoc(doc(db(member), "invites/TOOSOON01"), inviteDoc(member, tooSoon)));
+  });
+
+  it("judges expiry from request.time, including a stretched expiresAt", async () => {
+    const now = Date.now();
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const admin = ctx.firestore();
+      await setDoc(doc(admin, "invites/STILLGOOD"), {
+        tripId,
+        tripTitle: "京都自由行",
+        createdBy: member,
+        creatorRole: "member",
+        active: true,
+        expiresAt: Timestamp.fromMillis(now + 30 * 60 * 1000),
+        createdAt: Timestamp.fromMillis(now - 20 * 60 * 1000),
+      });
+      await setDoc(doc(admin, "invites/PASTEXP1"), {
+        tripId,
+        tripTitle: "京都自由行",
+        createdBy: leader,
+        creatorRole: "leader",
+        active: true,
+        expiresAt: Timestamp.fromMillis(now - 60 * 1000),
+        createdAt: Timestamp.fromMillis(now - 50 * 60 * 1000),
+      });
+      await setDoc(doc(admin, "invites/STRETCH01"), {
+        tripId,
+        tripTitle: "京都自由行",
+        createdBy: deputy,
+        creatorRole: "deputy",
+        active: true,
+        expiresAt: Timestamp.fromMillis(now + 30 * 60 * 1000),
+        createdAt: Timestamp.fromMillis(now - 61 * 60 * 1000),
+      });
+    });
+
+    await register("hour-guest");
+    await assertSucceeds(join("hour-guest", "STILLGOOD"));
+    await register("past-guest");
+    await assertFails(join("past-guest", "PASTEXP1"));
+    await register("long-guest");
+    await assertFails(join("long-guest", "STRETCH01"));
+  });
+
+  it("closes invites by killing only member codes, while officer codes keep their hour", async () => {
+    await assertSucceeds(setDoc(doc(db(member), "invites/MEMBERCD1"), inviteDoc(member)));
+    await assertSucceeds(setDoc(doc(db(leader), "invites/LEADERCD1"), inviteDoc(leader)));
+    await assertSucceeds(setDoc(doc(db(deputy), "invites/DEPUTYCD1"), inviteDoc(deputy)));
+    await register("before-guest");
+    await assertSucceeds(join("before-guest", "LEADERCD1"));
+
+    const trip = `trips/${tripId}`;
+    await assertFails(
+      updateDoc(doc(db(member), trip), {
+        invitesOpen: false,
+        invitesResetAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db(deputy), trip), {
+        invitesOpen: false,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db(deputy), trip), {
+        invitesOpen: false,
+        invitesResetAt: Timestamp.fromDate(new Date("2030-01-01T00:00:00Z")),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db(leader), trip), {
+        invitesOpen: false,
+        invitesResetAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+
+    const closed = await assertSucceeds(getDoc(doc(db(leader), trip)));
+    assert.equal(closed.get("invitesOpen"), false);
+    const resetAt = closed.get("invitesResetAt") as Timestamp;
+    assert.ok(Math.abs(Date.now() - resetAt.toMillis()) < 2 * 60 * 1000);
+
+    await register("after-guest");
+    await assertFails(join("after-guest", "MEMBERCD1"));
+    await register("leader-guest");
+    await assertSucceeds(join("leader-guest", "LEADERCD1"));
+    await register("deputy-guest");
+    await assertSucceeds(join("deputy-guest", "DEPUTYCD1"));
+    await assertFails(setDoc(doc(db(member), "invites/MEMBERCD2"), inviteDoc(member)));
+    await assertSucceeds(setDoc(doc(db(leader), "invites/LEADERCD2"), inviteDoc(leader)));
+    await assertSucceeds(setDoc(doc(db(deputy), "invites/DEPUTYCD2"), inviteDoc(deputy)));
+    await register("after-guest-2");
+    await assertSucceeds(join("after-guest-2", "LEADERCD2"));
+    await register("after-guest-3");
+    await assertSucceeds(join("after-guest-3", "DEPUTYCD2"));
+  });
+
+  it("uses creatorRole from mint time, so a later promotion does not save a member code", async () => {
+    await assertSucceeds(setDoc(doc(db(member), "invites/MEMBERCD1"), inviteDoc(member)));
+    await assertSucceeds(setDoc(doc(db(deputy), "invites/DEPUTYCD1"), inviteDoc(deputy)));
+    await assertSucceeds(
+      updateDoc(doc(db(leader), `trips/${tripId}/members/${member}`), { role: "deputy" }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db(leader), `trips/${tripId}/members/${deputy}`), { role: "member" }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db(leader), `trips/${tripId}`), {
+        invitesOpen: false,
+        invitesResetAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+
+    await register("role-guest");
+    await assertFails(join("role-guest", "MEMBERCD1"));
+    await assertSucceeds(join("role-guest", "DEPUTYCD1"));
+    await assertFails(setDoc(doc(db(deputy), "invites/DEPUTYCD2"), inviteDoc(deputy, aboutOneHourFromNow(), "member")));
+    await assertSucceeds(setDoc(doc(db(member), "invites/MEMBERCD2"), inviteDoc(member, aboutOneHourFromNow(), "deputy")));
+    await register("role-guest-2");
+    await assertSucceeds(join("role-guest-2", "MEMBERCD2"));
+  });
+
+  it("keeps the member-code cutoff after invites reopen, and a later close kills member codes minted in between", async () => {
+    await assertSucceeds(setDoc(doc(db(member), "invites/MEMBERCD1"), inviteDoc(member)));
+    await assertSucceeds(setDoc(doc(db(leader), "invites/LEADERCD1"), inviteDoc(leader)));
+    const trip = `trips/${tripId}`;
+    await assertSucceeds(
+      updateDoc(doc(db(leader), trip), {
+        invitesOpen: false,
+        invitesResetAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    const firstReset = (await assertSucceeds(getDoc(doc(db(leader), trip)))).get("invitesResetAt") as Timestamp;
+    await assertSucceeds(setDoc(doc(db(deputy), "invites/DEPUTYCD2"), inviteDoc(deputy)));
+
+    await assertFails(
+      updateDoc(doc(db(deputy), trip), {
+        invitesOpen: true,
+        invitesResetAt: null,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db(deputy), trip), {
+        invitesOpen: true,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    const reopened = await assertSucceeds(getDoc(doc(db(leader), trip)));
+    assert.equal(reopened.get("invitesOpen"), true);
+    assert.equal((reopened.get("invitesResetAt") as Timestamp).toMillis(), firstReset.toMillis());
+
+    await register("old-guest");
+    await assertFails(join("old-guest", "MEMBERCD1"));
+    await register("leader-still");
+    await assertSucceeds(join("leader-still", "LEADERCD1"));
+    await register("deputy-still");
+    await assertSucceeds(join("deputy-still", "DEPUTYCD2"));
+
+    await assertSucceeds(setDoc(doc(db(member), "invites/MEMBERCD3"), inviteDoc(member)));
+    await register("new-guest");
+    await assertSucceeds(join("new-guest", "MEMBERCD3"));
+
+    await assertSucceeds(
+      updateDoc(doc(db(deputy), trip), {
+        invitesOpen: false,
+        invitesResetAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    const secondReset = (await assertSucceeds(getDoc(doc(db(leader), trip)))).get("invitesResetAt") as Timestamp;
+    assert.ok(secondReset.toMillis() > firstReset.toMillis());
+
+    await register("killed-guest");
+    await assertFails(join("killed-guest", "MEMBERCD3"));
+    await assertFails(join("killed-guest", "MEMBERCD1"));
+    await assertSucceeds(join("killed-guest", "DEPUTYCD2"));
+    await register("leader-still-2");
+    await assertSucceeds(join("leader-still-2", "LEADERCD1"));
+    await assertFails(setDoc(doc(db(member), "invites/MEMBERCD4"), inviteDoc(member)));
+    await assertSucceeds(setDoc(doc(db(deputy), "invites/DEPUTYCD3"), inviteDoc(deputy)));
+    await register("fresh-guest");
+    await assertSucceeds(join("fresh-guest", "DEPUTYCD3"));
   });
 });

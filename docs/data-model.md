@@ -42,12 +42,12 @@ users/{uid}
     tripId, role, tripTitle, updatedAt
 
 invites/{code}
-  tripId, tripTitle, createdBy, active, expiresAt, createdAt
+  tripId, tripTitle, createdBy, creatorRole, active, expiresAt, createdAt
 
 trips/{tripId}
   schemaVersion, title, leaderId, status, startDate, endDate, timeZone,
   expectedReturnAt, generalTransport, returnTransport, returnFlight,
-  startedAt, endedAt, endReason, createdAt, updatedAt
+  startedAt, endedAt, endReason, invitesOpen, invitesResetAt, createdAt, updatedAt
   members/{uid}
     role, isMinor, displayName, photoUrl, inviteCode, joinedAt
   requests/{requestId}
@@ -108,14 +108,35 @@ trips/{tripId}
 
 邀請碼 8–12 個英數（`[A-Za-z0-9]`）。任何**已註冊**使用者知道碼就能 `get`，但這份文件沒有行程內容，只有標題快照。
 
+同一趟可以同時有多個有效碼。新碼**不會**使其他碼失效。同一個還有效的碼，在 1 小時內可以給多個人加入。
+
+效期只跟伺服器的 `request.time` 比，不看手機時鐘。
+
 | 欄位 | 型別 | 說明 |
 |---|---|---|
 | `tripId` | string | 目標旅程 |
 | `tripTitle` | string | 建立當下的 `trips.title` |
-| `createdBy` | string | 隊長 uid |
-| `active` | bool | 建立時 true。隊長可改成 false（撤銷），不能再改回 true |
-| `expiresAt` | timestamp \| null | null 表示直到撤銷前有效。有值則必須晚於建立時間 |
-| `createdAt` | timestamp | 伺服器時間 |
+| `createdBy` | string | 建立者 uid。`invitesOpen` 為 true 時可以是任何成員；關掉之後只能是隊長或副隊長 |
+| `creatorRole` | `"leader"` \| `"deputy"` \| `"member"` | 建立當下該成員文件上的 `role`。規則核對，不能改成別的角色，之後也不能改。加入時看這個快照，不看建立者後來的角色 |
+| `active` | bool | 建立時必須 true。隊長或副隊長可改成 false（撤銷）。不能改回 true，也不能改其他欄位 |
+| `expiresAt` | timestamp | 必填，不能是 null。建立時必須落在 `request.time + 1 小時` 往前 5 分鐘到 `request.time + 1 小時`（含）之間，用來吸收客戶端對時誤差，同時禁止把效期拉過 1 小時 |
+| `createdAt` | timestamp | 必須等於這次寫入的 `request.time` |
+
+加入時這些條件都要成立：
+
+- `active == true`
+- `creatorRole` 是 `leader`、`deputy` 或 `member`
+- `request.time < expiresAt`
+- `request.time < createdAt + 1 小時`（就算 `expiresAt` 寫得比較晚，效期仍被建立時間卡住）
+- 若 `creatorRole` 是 `member`，而且 `invitesResetAt` 有值，則 `createdAt >= invitesResetAt`。更早的一般成員碼立刻不能加入。`creatorRole` 是 `leader` 或 `deputy` 的碼不受這道截止時間影響，仍走到自己的 1 小時
+
+誰能建立：
+
+- `trips.invitesOpen == true`（建立旅程時的預設）：該趟的任何成員。
+- `invitesOpen == false`：只有隊長或副隊長。
+- 還不是成員的人不能建立。
+
+關掉邀請是單獨的一筆旅程更新，隊長或副隊長都可以寫：`invitesOpen` 從 true 改成 false，而且同一筆把 `invitesResetAt` 設成這次的 `request.time`。這一筆只使**當時已存在、且 `creatorRole` 為 `member` 的碼**失效。隊長或副隊長在關掉之前發的碼繼續有效，直到各自的 1 小時。關掉之後只有他們能發新碼，新碼照常可用。再把 `invitesOpen` 改回 true 時不能動 `invitesResetAt`，所以被這道截止時間擋下的一般成員碼不會復活。若要再清掉重新打開之後由一般成員發出的碼，就再關一次，會寫入新的 `invitesResetAt`；隊長與副隊長的碼仍然不受影響。一般成員不能改這兩個欄位。隊長或副隊長也可以把某個碼的 `active` 改成 false，那只撤銷那一個碼。
 
 ## trips/{tripId}
 
@@ -136,6 +157,8 @@ trips/{tripId}
 | `startedAt` | timestamp \| null | 隊長把 `planning` 轉成 `active` 時寫伺服器時間。目前只有隊長能開始 |
 | `endedAt` | timestamp \| null | 整團結束時間 |
 | `endReason` | string \| null | 未結束時必須是 null。客戶端整團結束只能寫 `leader_manual`。排程寫 `expected_return` 或 `end_date` |
+| `invitesOpen` | bool | 建立時必須 true。true 時任何成員可發邀請碼；false 時只有隊長或副隊長。隊長或副隊長都能改，而且這次寫入不能順便改其他旅程欄位 |
+| `invitesResetAt` | timestamp \| null | 建立時必須 null。關掉邀請的那一筆把它設成 `request.time`。只擋 `creatorRole == "member"` 且 `createdAt` 更早的碼。隊長或副隊長發的碼不看這個欄位。打開邀請時必須維持原值，被擋下的一般成員碼不會復活 |
 | `createdAt` / `updatedAt` | timestamp | 伺服器時間。`createdAt` 不變 |
 
 `status`：
@@ -148,7 +171,7 @@ trips/{tripId}
 建立順序：
 
 1. 寫 `users/{uid}`（已滿 13 歲）。
-2. 寫 `trips/{tripId}`（`leaderId` 是自己）。此時建立者已能 `get` 旅程，因為 `leaderId` 相符。
+2. 寫 `trips/{tripId}`（`leaderId` 是自己，`invitesOpen` 為 true，`invitesResetAt` 為 null）。此時建立者已能 `get` 旅程，因為 `leaderId` 相符。
 3. 寫 `members/{uid}`，`role = leader`，`inviteCode = null`，`isMinor` 依生日。
 4. 寫 `invites/{code}` 與 `users/{uid}/tripRefs/{tripId}`。
 
@@ -167,7 +190,7 @@ trips/{tripId}
 | `inviteCode` | string \| null | 隊長是 null。一般成員是用來加入的邀請碼 |
 | `joinedAt` | timestamp | 伺服器時間 |
 
-一般成員加入：`role` 只能是 `member`，邀請必須 `active`，且 `expiresAt` 為 null 或仍在未來，`isMinor` 必須算對。不能自封隊長或副隊長。
+一般成員加入：`role` 只能是 `member`，邀請碼必須通過上面的伺服器時間檢查（含 `invitesResetAt`），`isMinor` 必須算對。不能自封隊長或副隊長。同一個有效碼可以重複使用。
 
 隊長可把其他成員的 `role` 改成 `deputy` 或 `member`，不能改成 `leader`，也不能改對方的 `isMinor`。人數與副隊長是否必填（2–4 人不設、8 人以上必設）在 #14 才強制。
 
