@@ -82,4 +82,4 @@ CI（`.github/workflows/flutter.yml`）在 Flutter 3.47.8 上跑 `flutter analyz
 - Cloud Functions：修改申請到期、旅程在預計回程時間（或沒填時的結束日 23:59，旅程時區）結束並清位置、刪除帳號、8 人以上沒有副隊長不能開始。
 - FCM、Maps 金鑰、發送定位。這一版不收集 FCM 權杖，也沒有背景定位。
 
-Gradle 在有 `google-services.json` 時才套用外掛。這個環境沒有跑過 Android Gradle 建置。
+Gradle 在有 `google-services.json` 時才套用外掛。沒有該檔也能 `flutter build apk --debug`。

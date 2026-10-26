@@ -165,10 +165,21 @@ abstract final class FirestoreSchema {
   static const sentAt = 'sentAt';
   static const receivedAt = 'receivedAt';
 
-  static const fromUserId = 'fromUserId';
-  static const toUserId = 'toUserId';
+  static const fromLeaderId = 'fromLeaderId';
+  static const toMemberId = 'toMemberId';
+  static const rejectionCount = 'rejectionCount';
+  static const resolvedAt = 'resolvedAt';
+  static const handoverStatusPending = 'pending';
+  static const handoverStatusAccepted = 'accepted';
+  static const handoverStatusRejected = 'rejected';
+  static const handoverStatusAssigned = 'assigned';
+
+  static const memberId = 'memberId';
   static const expectedBackAt = 'expectedBackAt';
-  static const approved = 'approved';
+  static const noticeStatusAnnounced = 'announced';
+  static const noticeStatusPending = 'pending';
+  static const noticeStatusApproved = 'approved';
+  static const noticeStatusRejected = 'rejected';
 }
 
 /// 只留在手機 JSON。不要寫進 Firestore 文件。
@@ -182,9 +193,31 @@ abstract final class LocalOnlyFields {
   static const legacyPlaceId = 'placeId';
   static const legacyStartTime = 'startTime';
   static const legacyEndTime = 'endTime';
+  static const legacySpots = 'spots';
   static const analyticsConsent = 'analyticsConsent';
   static const crashlyticsConsent = 'crashlyticsConsent';
   static const consentDecided = 'consentDecided';
   static const email = 'email';
   static const birthday = 'birthday';
+  static const issuerRole = 'issuerRole';
+  static const requesterId = 'requesterId';
+  static const resolvedBy = 'resolvedBy';
+  static const proposedExpectedReturnAt = 'proposedExpectedReturnAt';
+  static const legacyRoleCaptain = 'captain';
+  static const legacyRoleDeputy = 'viceCaptain';
+  static const sessionUserId = 'sessionUserId';
+  static const passwordSalt = 'passwordSalt';
+  static const passwordHash = 'passwordHash';
+  static const queue = 'queue';
+  static const timeSample = 'timeSample';
+  static const acked = 'acked';
+  static const serverNow = 'serverNow';
+  static const deviceNow = 'deviceNow';
+  static const elapsedMs = 'elapsedMs';
+  static const encodedPolyline = 'encodedPolyline';
+  static const polyline = 'polyline';
+  static const durationSeconds = 'durationSeconds';
+  static const travelDuration = 'travelDuration';
+  static const route = 'route';
+  static const mapTile = 'mapTile';
 }

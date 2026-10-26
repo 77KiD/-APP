@@ -208,7 +208,7 @@ class FirestoreTripRemote implements TripRemote {
         FirestoreSchema.createdBy: invite.createdBy,
         FirestoreSchema.creatorRole: invite.issuerRole.wire,
         FirestoreSchema.active: true,
-        FirestoreSchema.expiresAt: _inviteExpiresAt(),
+        FirestoreSchema.expiresAt: await _inviteExpiresAt(),
         FirestoreSchema.createdAt: FieldValue.serverTimestamp(),
       });
     });
@@ -414,11 +414,17 @@ class FirestoreTripRemote implements TripRemote {
   }
 
   /// 路徑保留給後端規則與後續功能，這一版的畫面還不會寫入。
-  DocumentReference<Map<String, dynamic>> handoverRef(String tripId, String id) {
+  DocumentReference<Map<String, dynamic>> handoverRef(
+    String tripId,
+    String id,
+  ) {
     return _trips.doc(tripId).collection(FirestorePaths.handover).doc(id);
   }
 
-  DocumentReference<Map<String, dynamic>> soloNoticeRef(String tripId, String id) {
+  DocumentReference<Map<String, dynamic>> soloNoticeRef(
+    String tripId,
+    String id,
+  ) {
     return _trips.doc(tripId).collection(FirestorePaths.soloNotices).doc(id);
   }
 
@@ -491,10 +497,13 @@ class FirestoreTripRemote implements TripRemote {
     FirestoreSchema.updatedAt: FieldValue.serverTimestamp(),
   };
 
-  /// 規則要求 expiresAt 落在 request.time + 1 小時的前 5 分鐘內。
-  Timestamp _inviteExpiresAt() {
+  /// 規則把 expiresAt 限制在這次寫入的 request.time 加 1 小時、往前 5 分鐘以內。
+  /// 先寫 clockProbes 讀回伺服器時間，再加 1 小時。探針比邀請寫入早一點，
+  /// 所以這個時間落在窗口裡，也不會超過伺服器的 1 小時上限。
+  Future<Timestamp> _inviteExpiresAt() async {
+    final reading = await readServerClock(() async => DateTime.now().toUtc());
     return Timestamp.fromDate(
-      DateTime.now().toUtc().add(const Duration(minutes: 58)),
+      reading.serverNow.toUtc().add(const Duration(hours: 1)),
     );
   }
 

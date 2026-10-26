@@ -19,7 +19,7 @@ class LocalAuthRepository implements AuthRepository {
 
   Future<void> restore() async {
     final data = await store.read();
-    final session = data['sessionUserId'];
+    final session = data[LocalOnlyFields.sessionUserId];
     if (session is! String) return;
     _current = _accountFromUsers(data, session);
   }
@@ -71,11 +71,14 @@ class LocalAuthRepository implements AuthRepository {
       final users = _users(draft);
       users[account.id] = {
         ...account.toDeviceMap(),
-        'passwordSalt': salt,
-        'passwordHash': _hash(password: request.password, salt: salt),
+        LocalOnlyFields.passwordSalt: salt,
+        LocalOnlyFields.passwordHash: _hash(
+          password: request.password,
+          salt: salt,
+        ),
       };
-      draft['users'] = users;
-      draft['sessionUserId'] = account.id;
+      draft[FirestoreSchema.users] = users;
+      draft[LocalOnlyFields.sessionUserId] = account.id;
     });
     _emit(account);
     return account;
@@ -88,9 +91,12 @@ class LocalAuthRepository implements AuthRepository {
   }) async {
     final data = await store.read();
     final record = _findRecord(data, email.trim().toLowerCase());
-    if (record == null) return const SignInOutcome.failure(WrongCredentialsFailure());
-    final salt = '${record['passwordSalt']}';
-    if (_hash(password: password, salt: salt) != record['passwordHash']) {
+    if (record == null) {
+      return const SignInOutcome.failure(WrongCredentialsFailure());
+    }
+    final salt = '${record[LocalOnlyFields.passwordSalt]}';
+    if (_hash(password: password, salt: salt) !=
+        record[LocalOnlyFields.passwordHash]) {
       return const SignInOutcome.failure(WrongCredentialsFailure());
     }
     final account = _accountFromRecord(record);
@@ -98,7 +104,7 @@ class LocalAuthRepository implements AuthRepository {
       return const SignInOutcome.failure(MissingProfileFailure());
     }
     await store.transaction((draft) {
-      draft['sessionUserId'] = account.id;
+      draft[LocalOnlyFields.sessionUserId] = account.id;
     });
     _emit(account);
     return SignInOutcome.success(account);
@@ -107,7 +113,7 @@ class LocalAuthRepository implements AuthRepository {
   @override
   Future<void> signOut() async {
     await store.transaction((draft) {
-      draft.remove('sessionUserId');
+      draft.remove(LocalOnlyFields.sessionUserId);
     });
     _emit(null);
   }
@@ -132,7 +138,7 @@ class LocalAuthRepository implements AuthRepository {
           : <String, dynamic>{};
       record.addAll(updated.toDeviceMap());
       users[account.id] = record;
-      draft['users'] = users;
+      draft[FirestoreSchema.users] = users;
     });
     _emit(updated);
     return updated;
@@ -183,7 +189,7 @@ class LocalAuthRepository implements AuthRepository {
   }
 
   Map<String, dynamic> _users(Map<String, dynamic> data) {
-    final value = data['users'];
+    final value = data[FirestoreSchema.users];
     if (value is Map) return Map<String, dynamic>.from(value);
     return {};
   }

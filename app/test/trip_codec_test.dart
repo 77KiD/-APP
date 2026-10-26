@@ -83,23 +83,24 @@ void main() {
         Handover(
           id: 'h1',
           tripId: 't1',
-          fromUserId: 'a',
-          toUserId: 'b',
+          fromLeaderId: 'a',
+          toMemberId: 'b',
           status: 'pending',
           createdAt: DateTime.utc(2026, 10, 26),
         ),
       ),
     );
-    expect(handover.toUserId, 'b');
+    expect(handover.toMemberId, 'b');
+    expect(handover.rejectionCount, 0);
     final notice = TripCodec.soloNoticeFromMap(
       TripCodec.soloNoticeToMap(
         SoloNotice(
           id: 's1',
           tripId: 't1',
-          userId: 'a',
+          memberId: 'a',
           expectedBackAt: DateTime.utc(2026, 11, 1, 9),
           isMinor: true,
-          approved: false,
+          status: 'announced',
           createdAt: DateTime.utc(2026, 10, 26),
         ),
       ),
@@ -115,6 +116,9 @@ void main() {
     );
     expect(location.containsKey('mapTile'), isFalse);
     expect(location.containsKey('userId'), isFalse);
-    expect(location.keys, containsAll(['latitude', 'longitude', 'sentAt', 'receivedAt']));
+    expect(
+      location.keys,
+      containsAll(['latitude', 'longitude', 'sentAt', 'receivedAt']),
+    );
   });
 }

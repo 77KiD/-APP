@@ -17,12 +17,12 @@ abstract final class ItineraryCachePolicy {
   };
 
   static const forbiddenKeys = {
-    'encodedPolyline',
-    'polyline',
-    'durationSeconds',
-    'travelDuration',
-    'route',
-    'mapTile',
+    LocalOnlyFields.encodedPolyline,
+    LocalOnlyFields.polyline,
+    LocalOnlyFields.durationSeconds,
+    LocalOnlyFields.travelDuration,
+    LocalOnlyFields.route,
+    LocalOnlyFields.mapTile,
   };
 
   static const coordinateRetentionDays = 30;
@@ -163,23 +163,24 @@ abstract final class TripCodec {
     FirestoreSchema.decidedAt: _iso(request.resolvedAt),
   };
 
-  static Map<String, dynamic> requestToLocalMap(ModificationRequest request) => {
-    ...requestToMap(request),
-    LocalOnlyFields.documentId: request.id,
-    FirestoreSchema.tripId: request.tripId,
-    LocalOnlyFields.requesterName: request.requesterName,
-  };
+  static Map<String, dynamic> requestToLocalMap(ModificationRequest request) =>
+      {
+        ...requestToMap(request),
+        LocalOnlyFields.documentId: request.id,
+        FirestoreSchema.tripId: request.tripId,
+        LocalOnlyFields.requesterName: request.requesterName,
+      };
 
   static ModificationRequest requestFromMap(Map<String, dynamic> map) {
     final payload = map[FirestoreSchema.payload];
     final proposed = payload is Map
         ? payload[FirestoreSchema.expectedReturnAt]
-        : map['proposedExpectedReturnAt'];
+        : map[LocalOnlyFields.proposedExpectedReturnAt];
     return ModificationRequest(
       id: _string(map[LocalOnlyFields.documentId]),
       tripId: _string(map[FirestoreSchema.tripId]),
       requesterId: _string(
-        map[FirestoreSchema.proposerId] ?? map['requesterId'],
+        map[FirestoreSchema.proposerId] ?? map[LocalOnlyFields.requesterId],
       ),
       requesterName: _string(map[LocalOnlyFields.requesterName]),
       type: ModificationType.expectedReturnTime,
@@ -190,8 +191,12 @@ abstract final class TripCodec {
       ),
       createdAt: _requiredInstant(map[FirestoreSchema.createdAt]),
       expiresAt: _instant(map[FirestoreSchema.expiresAt]),
-      resolvedAt: _instant(map[FirestoreSchema.decidedAt] ?? map['resolvedAt']),
-      resolvedBy: (map[FirestoreSchema.decidedBy] ?? map['resolvedBy']) as String?,
+      resolvedAt: _instant(
+        map[FirestoreSchema.decidedAt] ?? map[FirestoreSchema.resolvedAt],
+      ),
+      resolvedBy:
+          (map[FirestoreSchema.decidedBy] ?? map[LocalOnlyFields.resolvedBy])
+              as String?,
     );
   }
 
@@ -206,7 +211,8 @@ abstract final class TripCodec {
   };
 
   static InviteRecord inviteFromMap(Map<String, dynamic> map, {String? code}) {
-    final roleRaw = map[FirestoreSchema.creatorRole] ?? map['issuerRole'];
+    final roleRaw =
+        map[FirestoreSchema.creatorRole] ?? map[LocalOnlyFields.issuerRole];
     return InviteRecord(
       code: code ?? _string(map[FirestoreSchema.inviteCode]),
       tripId: _string(map[FirestoreSchema.tripId]),
@@ -268,10 +274,11 @@ abstract final class TripCodec {
   };
 
   static ItineraryDay dayFromMap(Map<String, dynamic> map) {
-    final spots = map[FirestoreSchema.stops] ?? map['spots'];
+    final spots =
+        map[FirestoreSchema.stops] ?? map[LocalOnlyFields.legacySpots];
     return ItineraryDay(
       tripId: _string(map[FirestoreSchema.tripId]),
-      date: _string(map[FirestoreSchema.date] ?? map['date']),
+      date: _string(map[FirestoreSchema.date]),
       spots: spots is List
           ? [
               for (final spot in spots)
@@ -316,30 +323,35 @@ abstract final class TripCodec {
   static Map<String, dynamic> handoverToMap(Handover handover) => {
     LocalOnlyFields.documentId: handover.id,
     FirestoreSchema.tripId: handover.tripId,
-    FirestoreSchema.fromUserId: handover.fromUserId,
-    FirestoreSchema.toUserId: handover.toUserId,
+    FirestoreSchema.fromLeaderId: handover.fromLeaderId,
+    FirestoreSchema.toMemberId: handover.toMemberId,
     FirestoreSchema.status: handover.status,
+    FirestoreSchema.rejectionCount: handover.rejectionCount,
     FirestoreSchema.createdAt: _iso(handover.createdAt),
+    FirestoreSchema.resolvedAt: _iso(handover.resolvedAt),
   };
 
   static Handover handoverFromMap(Map<String, dynamic> map) {
+    final count = map[FirestoreSchema.rejectionCount];
     return Handover(
       id: _string(map[LocalOnlyFields.documentId]),
       tripId: _string(map[FirestoreSchema.tripId]),
-      fromUserId: _string(map[FirestoreSchema.fromUserId]),
-      toUserId: _string(map[FirestoreSchema.toUserId]),
+      fromLeaderId: _string(map[FirestoreSchema.fromLeaderId]),
+      toMemberId: _string(map[FirestoreSchema.toMemberId]),
       status: _string(map[FirestoreSchema.status]),
+      rejectionCount: count is num ? count.round() : 0,
       createdAt: _requiredInstant(map[FirestoreSchema.createdAt]),
+      resolvedAt: _instant(map[FirestoreSchema.resolvedAt]),
     );
   }
 
   static Map<String, dynamic> soloNoticeToMap(SoloNotice notice) => {
     LocalOnlyFields.documentId: notice.id,
     FirestoreSchema.tripId: notice.tripId,
-    LocalOnlyFields.userId: notice.userId,
+    FirestoreSchema.memberId: notice.memberId,
     FirestoreSchema.expectedBackAt: _iso(notice.expectedBackAt),
     FirestoreSchema.isMinor: notice.isMinor,
-    FirestoreSchema.approved: notice.approved,
+    FirestoreSchema.status: notice.status,
     FirestoreSchema.createdAt: _iso(notice.createdAt),
   };
 
@@ -347,10 +359,10 @@ abstract final class TripCodec {
     return SoloNotice(
       id: _string(map[LocalOnlyFields.documentId]),
       tripId: _string(map[FirestoreSchema.tripId]),
-      userId: _string(map[LocalOnlyFields.userId]),
+      memberId: _string(map[FirestoreSchema.memberId]),
       expectedBackAt: _requiredInstant(map[FirestoreSchema.expectedBackAt]),
       isMinor: map[FirestoreSchema.isMinor] == true,
-      approved: map[FirestoreSchema.approved] == true,
+      status: _string(map[FirestoreSchema.status]),
       createdAt: _requiredInstant(map[FirestoreSchema.createdAt]),
     );
   }

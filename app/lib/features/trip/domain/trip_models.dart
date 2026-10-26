@@ -21,8 +21,10 @@ enum MemberRole {
 
   static MemberRole parse(String raw) {
     return switch (raw) {
-      FirestoreSchema.roleLeader || 'captain' => MemberRole.captain,
-      FirestoreSchema.roleDeputy || 'viceCaptain' => MemberRole.viceCaptain,
+      FirestoreSchema.roleLeader ||
+      LocalOnlyFields.legacyRoleCaptain => MemberRole.captain,
+      FirestoreSchema.roleDeputy ||
+      LocalOnlyFields.legacyRoleDeputy => MemberRole.viceCaptain,
       _ => MemberRole.member,
     };
   }
@@ -303,18 +305,22 @@ class Handover {
   const Handover({
     required this.id,
     required this.tripId,
-    required this.fromUserId,
-    required this.toUserId,
+    required this.fromLeaderId,
+    required this.toMemberId,
     required this.status,
     required this.createdAt,
+    this.rejectionCount = 0,
+    this.resolvedAt,
   });
 
   final String id;
   final String tripId;
-  final String fromUserId;
-  final String toUserId;
+  final String fromLeaderId;
+  final String toMemberId;
   final String status;
+  final int rejectionCount;
   final DateTime createdAt;
+  final DateTime? resolvedAt;
 }
 
 /// `trips/{tripId}/soloNotices`。未成年者的單獨行動需要正副隊長其中一位同意。
@@ -322,19 +328,19 @@ class SoloNotice {
   const SoloNotice({
     required this.id,
     required this.tripId,
-    required this.userId,
+    required this.memberId,
     required this.expectedBackAt,
     required this.isMinor,
-    required this.approved,
+    required this.status,
     required this.createdAt,
   });
 
   final String id;
   final String tripId;
-  final String userId;
+  final String memberId;
   final DateTime expectedBackAt;
   final bool isMinor;
-  final bool approved;
+  final String status;
   final DateTime createdAt;
 }
 
@@ -392,18 +398,16 @@ enum SyncOpType {
 }
 
 class SyncOp {
-  const SyncOp({
-    required this.type,
-    required this.tripId,
-    this.entityId,
-  });
+  const SyncOp({required this.type, required this.tripId, this.entityId});
 
   final SyncOpType type;
   final String tripId;
   final String? entityId;
 
   bool sameAs(SyncOp other) =>
-      type == other.type && tripId == other.tripId && entityId == other.entityId;
+      type == other.type &&
+      tripId == other.tripId &&
+      entityId == other.entityId;
 }
 
 class TripException implements Exception {

@@ -100,7 +100,9 @@ class OfflineTripRepository implements TripRepository {
     final cachedMember = await local.isMember(tripId, userId);
     if (!connectivity.isOnline) {
       if (cached != null && cachedMember) return cached;
-      throw cached == null ? ValidationException(AppStrings.offlineMissing) : TripAccessDenied();
+      throw cached == null
+          ? ValidationException(AppStrings.offlineMissing)
+          : TripAccessDenied();
     }
     final pendingLocalWrite = await _hasPending(tripId, SyncOpType.upsertTrip);
     if (pendingLocalWrite && cached != null && cachedMember) return cached;
@@ -119,10 +121,11 @@ class OfflineTripRepository implements TripRepository {
           cached.updatedAt.isAfter(remoteTrip.updatedAt)) {
         return cached;
       }
-      await local.saveTrip(remoteTrip);
+      final merged = _keepDeviceOnlyFields(remoteTrip, cached);
+      await local.saveTrip(merged);
       await local.saveMembers(tripId, members);
       await _cacheInvites(remoteTrip.id);
-      return remoteTrip;
+      return merged;
     } on TripAccessDenied {
       if (cached != null && cachedMember) return cached;
       rethrow;
@@ -235,7 +238,12 @@ class OfflineTripRepository implements TripRepository {
     if (!self.role.canEditExpectedReturnDirectly) {
       throw RoleChangeException('只有隊長或副隊長可以同意修改申請');
     }
-    return _resolve(tripId: tripId, requestId: requestId, approve: true, self: self);
+    return _resolve(
+      tripId: tripId,
+      requestId: requestId,
+      approve: true,
+      self: self,
+    );
   }
 
   @override
@@ -247,7 +255,12 @@ class OfflineTripRepository implements TripRepository {
     if (!self.role.canEditExpectedReturnDirectly) {
       throw RoleChangeException('只有隊長或副隊長可以拒絕修改申請');
     }
-    await _resolve(tripId: tripId, requestId: requestId, approve: false, self: self);
+    await _resolve(
+      tripId: tripId,
+      requestId: requestId,
+      approve: false,
+      self: self,
+    );
     final requests = await local.readRequests(tripId);
     return requests.firstWhere((request) => request.id == requestId);
   }
@@ -694,7 +707,7 @@ class OfflineTripRepository implements TripRepository {
           await remote.upsertRequest(request);
         }
       } else {
-        await local.saveTrip(remoteTrip);
+        await local.saveTrip(_keepDeviceOnlyFields(remoteTrip, cached));
         await _cacheInvites(remoteTrip.id);
         await local.saveMembers(
           remoteTrip.id,
@@ -711,6 +724,30 @@ class OfflineTripRepository implements TripRepository {
         await local.saveLocation(remoteTrip.id, snapshot);
       }
     }
+  }
+
+  /// Firestore 旅程文件沒有邀請碼和成員清單。讀回來時保留手機上的那兩欄。
+  Trip _keepDeviceOnlyFields(Trip remoteTrip, Trip? cached) {
+    if (cached == null || cached.id != remoteTrip.id) return remoteTrip;
+    final inviteCode = remoteTrip.inviteCode.isNotEmpty
+        ? remoteTrip.inviteCode
+        : cached.inviteCode;
+    final memberIds = remoteTrip.memberIds.isNotEmpty
+        ? remoteTrip.memberIds
+        : cached.memberIds;
+    if (inviteCode == remoteTrip.inviteCode &&
+        _sameIds(memberIds, remoteTrip.memberIds)) {
+      return remoteTrip;
+    }
+    return remoteTrip.copy(inviteCode: inviteCode, memberIds: memberIds);
+  }
+
+  bool _sameIds(List<String> left, List<String> right) {
+    if (left.length != right.length) return false;
+    for (var i = 0; i < left.length; i++) {
+      if (left[i] != right[i]) return false;
+    }
+    return true;
   }
 
   InviteRecord _issued({
