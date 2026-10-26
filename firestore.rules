@@ -131,6 +131,8 @@ service cloud.firestore {
         "startedAt",
         "endedAt",
         "endReason",
+        "invitesOpen",
+        "invitesResetAt",
         "createdAt",
         "updatedAt"
       ]);
@@ -176,6 +178,8 @@ service cloud.firestore {
         && (data.expectedReturnAt == null || data.expectedReturnAt is timestamp)
         && endShapeOk(data)
         && startedShapeOk(data)
+        && data.invitesOpen is bool
+        && (data.invitesResetAt == null || data.invitesResetAt is timestamp)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -194,15 +198,50 @@ service cloud.firestore {
         && data.joinedAt is timestamp;
     }
 
+    // Join checks request.time only. Lifetime is also capped at createdAt + 1h
+    // so a client cannot stretch expiresAt past one server hour.
+    function inviteStillValid(data) {
+      return data.active == true
+        && data.expiresAt is timestamp
+        && data.createdAt is timestamp
+        && request.time < data.expiresAt
+        && request.time < data.createdAt + duration.value(1, 'h');
+    }
+
+    // Codes created before invitesResetAt are dead, including officer codes.
+    // Null means the trip has never closed invites. Comparison is >= so a code
+    // minted in a later request (createdAt == that request's request.time) still works.
+    function inviteAfterReset(invite, trip) {
+      return trip.invitesResetAt == null
+        || invite.createdAt >= trip.invitesResetAt;
+    }
+
     function inviteGrants(code, tripId) {
+      let invite = get(invitePath(code)).data;
+      let trip = get(tripPath(tripId)).data;
       return code is string
         && exists(invitePath(code))
-        && get(invitePath(code)).data.tripId == tripId
-        && get(invitePath(code)).data.active == true
+        && invite.tripId == tripId
+        && inviteStillValid(invite)
+        && inviteAfterReset(invite, trip);
+    }
+
+    // invitesOpen defaults to true: any member may mint. After a leader or deputy
+    // sets it false, only they may mint. Several codes may be valid at once.
+    function canIssueInvite(tripId) {
+      return isMember(tripId)
         && (
-          get(invitePath(code)).data.expiresAt == null
-          || get(invitePath(code)).data.expiresAt > request.time
+          get(tripPath(tripId)).data.invitesOpen == true
+          || isLeaderOrDeputy(tripId)
         );
+    }
+
+    // Client writes expiresAt; rules pin it to request.time + 1h.
+    // The 5 minute floor absorbs clock skew. Nothing later than request.time + 1h is accepted.
+    function expiresOneServerHourFromNow(expiresAt) {
+      return expiresAt is timestamp
+        && expiresAt <= request.time + duration.value(1, 'h')
+        && expiresAt >= request.time + duration.value(1, 'h') - duration.value(5, 'm');
     }
 
     function validPayload(type, payload) {
@@ -338,20 +377,11 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.active == true
         && request.resource.data.createdAt == request.time
-        && (
-          request.resource.data.expiresAt == null
-          || (
-            request.resource.data.expiresAt is timestamp
-            && request.resource.data.expiresAt > request.time
-          )
-        )
-        && get(tripPath(request.resource.data.tripId)).data.leaderId == request.auth.uid
-        && request.resource.data.tripTitle == get(tripPath(request.resource.data.tripId)).data.title
-        && get(memberPath(request.resource.data.tripId, request.auth.uid)).data.role == "leader";
+        && expiresOneServerHourFromNow(request.resource.data.expiresAt)
+        && canIssueInvite(request.resource.data.tripId)
+        && request.resource.data.tripTitle == get(tripPath(request.resource.data.tripId)).data.title;
 
-      allow update: if registered()
-        && resource.data.createdBy == request.auth.uid
-        && get(tripPath(resource.data.tripId)).data.leaderId == request.auth.uid
+      allow update: if isLeaderOrDeputy(resource.data.tripId)
         && request.resource.data.keys().hasOnly([
           "tripId", "tripTitle", "createdBy", "active", "expiresAt", "createdAt"
         ])
@@ -379,6 +409,8 @@ service cloud.firestore {
         && request.resource.data.startedAt == null
         && request.resource.data.endedAt == null
         && request.resource.data.endReason == null
+        && request.resource.data.invitesOpen == true
+        && request.resource.data.invitesResetAt == null
         && validOptionalFutureTime(request.resource.data.expectedReturnAt)
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
@@ -429,6 +461,24 @@ service cloud.firestore {
             && request.resource.data.status == "ended"
             && request.resource.data.endReason == "leader_manual"
             && request.resource.data.endedAt == request.time
+          )
+          || (
+            // Closing stamps invitesResetAt to this request's server time and
+            // kills every code created before it. Reopening must leave that stamp.
+            isLeaderOrDeputy(tripId)
+            && changedKeys().hasOnly(["invitesOpen", "invitesResetAt", "updatedAt"])
+            && (
+              (
+                resource.data.invitesOpen == true
+                && request.resource.data.invitesOpen == false
+                && request.resource.data.invitesResetAt == request.time
+              )
+              || (
+                resource.data.invitesOpen == false
+                && request.resource.data.invitesOpen == true
+                && request.resource.data.invitesResetAt == resource.data.invitesResetAt
+              )
+            )
           )
         );
 
