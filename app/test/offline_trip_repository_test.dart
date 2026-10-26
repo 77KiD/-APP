@@ -10,6 +10,7 @@ import 'package:group_trip/features/trip/data/offline_trip_repository.dart';
 import 'package:group_trip/features/trip/data/trip_local_store.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/features/trip/domain/trip_policy.dart';
+import 'package:group_trip/l10n/app_strings.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 
 import 'support/harness.dart';
@@ -387,6 +388,176 @@ void main() {
     );
     expect((await reopened.getTrip(trip.id)).title, '京都自由行');
     if (file.existsSync()) file.deleteSync();
+  });
+
+  test('同一個邀請碼在 1 小時內可以給多個人使用', () async {
+    final world = TestWorld(now: DateTime.utc(2026, 10, 26, 1));
+    await world.auth.signUp(
+      email: 'ada@example.com',
+      password: 'password1',
+      displayName: '小美',
+      birthday: '2000-01-01',
+      birthdayConsent: true,
+      today: world.clock.current,
+    );
+    final trip = await world.trips.createTrip(
+      sampleForm(returnDate: '', returnTime: ''),
+    );
+    final first = await world
+        .repositoryFor(person('first', '甲'))
+        .joinWithInviteCode(trip.inviteCode);
+    final second = await world
+        .repositoryFor(person('second', '乙'))
+        .joinWithInviteCode(trip.inviteCode.toLowerCase());
+    expect(first.id, second.id);
+    expect(
+      (await world.trips.listMembers(trip.id)).map((member) => member.userId),
+      containsAll([world.auth.current!.id, 'first', 'second']),
+    );
+    expect(world.database.invites.containsKey(trip.inviteCode), isTrue);
+  });
+
+  test('加入是否過期只看伺服器時間：差 1 毫秒可以，滿 1 小時與之後不行', () async {
+    final world = TestWorld(now: DateTime.utc(2026, 10, 26, 1));
+    await world.auth.signUp(
+      email: 'ada@example.com',
+      password: 'password1',
+      displayName: '小美',
+      birthday: '2000-01-01',
+      birthdayConsent: true,
+      today: world.clock.current,
+    );
+    final trip = await world.trips.createTrip(
+      sampleForm(returnDate: '', returnTime: ''),
+    );
+    final invite = world.database.invites[trip.inviteCode]!;
+    expect(invite.expiresAt.difference(invite.createdAt), const Duration(hours: 1));
+
+    world.database.clock = invite.expiresAt.subtract(
+      const Duration(milliseconds: 1),
+    );
+    final early = await world
+        .repositoryFor(
+          person('early', '早'),
+          deviceClock: FixedDeviceClock(
+            invite.createdAt.subtract(const Duration(days: 1)),
+          ),
+        )
+        .joinWithInviteCode(trip.inviteCode);
+    expect(early.memberIds, contains('early'));
+
+    world.database.clock = invite.expiresAt;
+    await expectLater(
+      world
+          .repositoryFor(
+            person('exact', '準'),
+            deviceClock: FixedDeviceClock(invite.createdAt),
+          )
+          .joinWithInviteCode(trip.inviteCode),
+      throwsA(
+        isA<InviteExpiredException>().having(
+          (error) => error.message,
+          'message',
+          AppStrings.inviteExpired,
+        ),
+      ),
+    );
+
+    world.database.clock = invite.expiresAt.add(const Duration(milliseconds: 1));
+    await expectLater(
+      world
+          .repositoryFor(
+            person('late', '晚'),
+            deviceClock: FixedDeviceClock(invite.expiresAt.add(const Duration(hours: 5))),
+          )
+          .joinWithInviteCode(trip.inviteCode),
+      throwsA(isA<InviteExpiredException>()),
+    );
+  });
+
+  test('公開邀請預設開啟；關閉後只有隊長和副隊長能產生，新碼不會使舊碼失效', () async {
+    final world = TestWorld(now: DateTime.utc(2026, 10, 26, 1));
+    await world.auth.signUp(
+      email: 'ada@example.com',
+      password: 'password1',
+      displayName: '小美',
+      birthday: '2000-01-01',
+      birthdayConsent: true,
+      today: world.clock.current,
+    );
+    final trip = await world.trips.createTrip(
+      sampleForm(returnDate: '', returnTime: ''),
+    );
+    expect(trip.publicInvite, isTrue);
+    final original = world.database.invites[trip.inviteCode]!;
+    final member = person('member', '成員');
+    final memberRepo = world.repositoryFor(member);
+    await memberRepo.joinWithInviteCode(trip.inviteCode);
+
+    final issued = await memberRepo.issueInviteCode(trip.id);
+    expect(issued.code, isNot(original.code));
+    expect(issued.createdBy, member.id);
+    expect(
+      world.database.invites[original.code]!.expiresAt,
+      original.expiresAt,
+    );
+    expect(
+      (await memberRepo.listInvites(trip.id)).map((invite) => invite.code),
+      containsAll([original.code, issued.code]),
+    );
+    final viaOriginal = await world
+        .repositoryFor(person('via-old', '舊碼'))
+        .joinWithInviteCode(original.code);
+    expect(viaOriginal.memberIds, contains('via-old'));
+    final viaNew = await world
+        .repositoryFor(person('via-new', '新碼'))
+        .joinWithInviteCode(issued.code);
+    expect(viaNew.memberIds, contains('via-new'));
+
+    await world.trips.setPublicInvite(tripId: trip.id, enabled: false);
+    expect((await world.trips.getTrip(trip.id)).publicInvite, isFalse);
+    final still = await world
+        .repositoryFor(person('still', '仍可'))
+        .joinWithInviteCode(issued.code);
+    expect(still.memberIds, contains('still'));
+    await expectLater(
+      memberRepo.issueInviteCode(trip.id),
+      throwsA(
+        isA<RoleChangeException>().having(
+          (error) => error.message,
+          'message',
+          AppStrings.cannotIssueInvite,
+        ),
+      ),
+    );
+
+    final stored = world.database.members[trip.id]![member.id]!;
+    world.database.members[trip.id]![member.id] = stored.copy(
+      role: MemberRole.viceCaptain,
+    );
+    final asVice = await memberRepo.issueInviteCode(trip.id);
+    expect(asVice.code, isNot(original.code));
+    expect(
+      world.database.invites[original.code]!.expiresAt,
+      original.expiresAt,
+    );
+
+    world.database.members[trip.id]![member.id] = stored;
+    final captainCode = await world.trips.issueInviteCode(trip.id);
+    expect(world.database.invites.containsKey(captainCode.code), isTrue);
+    expect(
+      world.database.invites[original.code]!.expiresAt,
+      original.expiresAt,
+    );
+
+    await expectLater(
+      memberRepo.setPublicInvite(tripId: trip.id, enabled: true),
+      throwsA(isA<RoleChangeException>()),
+    );
+    await world.trips.setPublicInvite(tripId: trip.id, enabled: true);
+    final again = await memberRepo.issueInviteCode(trip.id);
+    expect(again.code, isNot(original.code));
+    expect(world.database.invites.containsKey(original.code), isTrue);
   });
 }
 

@@ -92,6 +92,30 @@ abstract final class TripPolicy {
     return roles.contains(MemberRole.viceCaptain);
   }
 
+  static const inviteLifetime = Duration(hours: 1);
+
+  static DateTime inviteExpiresAt(DateTime createdAt) =>
+      createdAt.toUtc().add(inviteLifetime);
+
+  /// 滿 1 小時（[now] 等於 [expiresAt]）起算過期。
+  static bool isInviteExpired(DateTime expiresAt, DateTime now) =>
+      !now.toUtc().isBefore(expiresAt.toUtc());
+
+  static Duration inviteRemaining(DateTime expiresAt, DateTime now) {
+    final remaining = expiresAt.toUtc().difference(now.toUtc());
+    if (remaining.isNegative) return Duration.zero;
+    return remaining;
+  }
+
+  /// [publicInvite] 開啟時任何成員都可以產生。關閉後只有隊長和副隊長。
+  static bool canIssueInvite({
+    required MemberRole role,
+    required bool publicInvite,
+  }) {
+    if (publicInvite) return true;
+    return role == MemberRole.captain || role == MemberRole.viceCaptain;
+  }
+
   /// 有副隊長，或 2–4 人團：30 分鐘過期。
   /// 5–7 人且沒有副隊長：不過期。其餘情況（含 8 人以上還沒有副隊長）仍是 30 分鐘。
   static DateTime? requestExpiresAt({

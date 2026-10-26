@@ -33,10 +33,32 @@ void main() {
     final restored = TripCodec.tripFromMap(TripCodec.tripToMap(trip));
     expect(restored.expectedReturnAt, trip.expectedReturnAt);
     expect(restored.timeZone, 'Asia/Taipei');
-    expect(TripCodec.inviteToMap(tripId: 't1', createdAt: trip.createdAt).keys, {
+    expect(restored.publicInvite, isTrue);
+    final invite = InviteRecord(
+      code: 'AB2345',
+      tripId: 't1',
+      createdBy: 'u1',
+      createdAt: trip.createdAt,
+      expiresAt: trip.createdAt.add(const Duration(hours: 1)),
+    );
+    expect(TripCodec.inviteToMap(invite).keys, {
+      'code',
       'tripId',
+      'createdBy',
       'createdAt',
+      'expiresAt',
     });
+    expect(
+      TripCodec.inviteFromMap(TripCodec.inviteToMap(invite)).expiresAt,
+      invite.expiresAt,
+    );
+    expect(
+      TripCodec.tripFromMap({
+        ...TripCodec.tripToMap(trip),
+        'publicInvite': false,
+      }).publicInvite,
+      isFalse,
+    );
   });
 
   test('交接、單獨行動與位置快照的形狀固定', () {

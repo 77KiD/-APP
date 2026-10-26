@@ -18,11 +18,11 @@ abstract class TripRemote {
 
   Future<List<ModificationRequest>> fetchRequests(String tripId);
 
-  Future<void> upsertInvite({
-    required String code,
-    required String tripId,
-    required DateTime createdAt,
-  });
+  Future<void> upsertInvite(InviteRecord invite);
+
+  Future<InviteRecord?> fetchInvite(String code);
+
+  Future<List<InviteRecord>> fetchInvites(String tripId);
 
   Future<Trip> join({required String code, required TripMember member});
 
@@ -76,6 +76,12 @@ abstract class TripRepository {
   });
 
   Future<Trip> joinWithInviteCode(String code);
+
+  Future<InviteRecord> issueInviteCode(String tripId);
+
+  Future<Trip> setPublicInvite({required String tripId, required bool enabled});
+
+  Future<List<InviteRecord>> listInvites(String tripId);
 
   Future<void> saveItineraryDay(ItineraryDay day);
 

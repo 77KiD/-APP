@@ -78,6 +78,34 @@ abstract final class AppStrings {
   static const inviteCode = '邀請碼';
   static const copyInvite = '複製邀請碼';
   static const copiedInvite = '已複製邀請碼';
+  static const inviteExpired = '邀請碼已過期，請向隊長索取新的邀請碼';
+  static const issueInvite = '產生邀請碼';
+  static const inviteIssued = '已產生新的邀請碼。較早的邀請碼在各自的 1 小時內仍然有效。';
+  static const publicInvite = '公開邀請';
+  static const publicInviteHelp =
+      '開啟時，任何成員都可以產生邀請碼。關閉後，只有隊長和副隊長可以產生。';
+  static const inviteRestricted =
+      '隊長已關閉公開邀請。現在只有隊長和副隊長可以產生邀請碼。';
+  static const cannotIssueInvite =
+      '隊長已關閉公開邀請。現在只有隊長和副隊長可以產生邀請碼。';
+  static const onlyCaptainSetsPublicInvite = '只有隊長可以變更公開邀請';
+  static const inviteAdvisory = '剩餘時間依這台手機估算，實際是否過期以伺服器時間為準。';
+  static String copyInviteCode(String code) => '複製邀請碼 $code';
+
+  /// 畫面上的剩餘時間。剛好 0 則視為已過期。
+  static String inviteRemaining(Duration remaining) {
+    if (remaining <= Duration.zero) return inviteExpired;
+    final hours = remaining.inHours;
+    final minutes = remaining.inMinutes.remainder(60);
+    final seconds = remaining.inSeconds.remainder(60);
+    final parts = <String>[
+      if (hours > 0) '$hours 小時',
+      if (minutes > 0) '$minutes 分',
+      if (seconds > 0) '$seconds 秒',
+    ];
+    if (parts.isEmpty) return inviteExpired;
+    return '這個邀請碼還能使用 ${parts.join(' ')}';
+  }
   static const members = '成員';
   static const roleCaptain = '隊長';
   static const roleVice = '副隊長';

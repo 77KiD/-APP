@@ -1,4 +1,5 @@
 import 'package:group_trip/features/trip/domain/trip_models.dart';
+import 'package:group_trip/features/trip/domain/trip_policy.dart';
 import 'package:group_trip/features/trip/domain/trip_repository.dart';
 
 /// 兩台手機可以各有一個 [MemoryTripRemote]，共用這一份資料。
@@ -7,7 +8,7 @@ class MemoryTripDatabase {
   final trips = <String, Trip>{};
   final members = <String, Map<String, TripMember>>{};
   final requests = <String, Map<String, ModificationRequest>>{};
-  final invites = <String, String>{};
+  final invites = <String, InviteRecord>{};
   final itinerary = <String, Map<String, ItineraryDay>>{};
   final revisions = <String, Map<String, ItineraryRevision>>{};
   final locations = <String, Map<String, LocationSnapshot>>{};
@@ -31,7 +32,6 @@ class MemoryTripRemote implements TripRemote {
   @override
   Future<void> upsertTrip(Trip trip) async {
     database.trips[trip.id] = trip;
-    database.invites[trip.inviteCode] = trip.id;
   }
 
   @override
@@ -81,20 +81,41 @@ class MemoryTripRemote implements TripRemote {
   }
 
   @override
-  Future<void> upsertInvite({
-    required String code,
-    required String tripId,
-    required DateTime createdAt,
-  }) async {
-    database.invites[code] = tripId;
+  Future<void> upsertInvite(InviteRecord invite) async {
+    final code = invite.code.trim().toUpperCase();
+    database.invites[code] = InviteRecord(
+      code: code,
+      tripId: invite.tripId,
+      createdBy: invite.createdBy,
+      createdAt: invite.createdAt.toUtc(),
+      expiresAt: invite.expiresAt.toUtc(),
+    );
+  }
+
+  @override
+  Future<InviteRecord?> fetchInvite(String code) async {
+    return database.invites[code.trim().toUpperCase()];
+  }
+
+  @override
+  Future<List<InviteRecord>> fetchInvites(String tripId) async {
+    _ensureMember(tripId);
+    return [
+      for (final invite in database.invites.values)
+        if (invite.tripId == tripId) invite,
+    ];
   }
 
   @override
   Future<Trip> join({required String code, required TripMember member}) async {
-    final tripId = database.invites[code.trim().toUpperCase()];
-    if (tripId == null || !database.trips.containsKey(tripId)) {
+    final invite = database.invites[code.trim().toUpperCase()];
+    if (invite == null || !database.trips.containsKey(invite.tripId)) {
       throw InviteNotFoundException();
     }
+    if (TripPolicy.isInviteExpired(invite.expiresAt, database.clock)) {
+      throw InviteExpiredException();
+    }
+    final tripId = invite.tripId;
     final tripMembers = database.members.putIfAbsent(tripId, () => {});
     if (tripMembers.containsKey(member.userId)) throw AlreadyMemberException();
     final saved = TripMember(

@@ -127,7 +127,25 @@ void main() {
 
     expect(find.text(AppStrings.roleCaptain), findsOneWidget);
     expect(find.byKey(const Key('invite-code')), findsOneWidget);
-    expect(find.bySemanticsLabel(AppStrings.avatarLabel('小美')), findsOneWidget);
+    expect(
+      find.text(AppStrings.inviteRemaining(const Duration(hours: 1))),
+      findsOneWidget,
+    );
+    expect(find.text(AppStrings.inviteAdvisory), findsOneWidget);
+    expect(
+      tester.widget<OutlinedButton>(find.byKey(const Key('issue-invite'))).onPressed,
+      isNotNull,
+    );
+    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value, isTrue);
+    await tester.ensureVisible(find.byType(SwitchListTile));
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value, isFalse);
+    expect((await world.trips.listMyTrips()).single.publicInvite, isFalse);
+    expect(
+      find.bySemanticsLabel(AppStrings.avatarLabel('小美'), skipOffstage: false),
+      findsOneWidget,
+    );
     expect(world.database.trips, isEmpty);
     final trip = (await world.trips.listMyTrips()).single;
     expect(trip.endDate, '2026-11-05');
@@ -188,5 +206,60 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining(AppStrings.inviteCode), findsWidgets);
+  });
+
+  testWidgets('公開邀請關閉時，一般成員的產生按鈕不能按', (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final world = TestWorld();
+    await world.auth.signUp(
+      email: 'ada@example.com',
+      password: 'password1',
+      displayName: '小美',
+      birthday: '2000-01-01',
+      birthdayConsent: true,
+      today: world.clock.current,
+    );
+    final trip = await world.trips.createTrip(
+      const NewTripForm(
+        title: '測試團',
+        startDate: '2026-12-01',
+        endDate: '2026-12-03',
+        timeZone: 'Asia/Taipei',
+        returnDate: '',
+        returnTime: '',
+      ),
+    );
+    await world.trips.setPublicInvite(tripId: trip.id, enabled: false);
+    final joined = await world.auth.signUp(
+      email: 'hua@example.com',
+      password: 'password1',
+      displayName: '小華',
+      birthday: '2000-01-01',
+      birthdayConsent: true,
+      today: world.clock.current,
+    );
+    final member = joined.account!;
+    await world.remote.upsertMember(
+      TripMember(
+        tripId: trip.id,
+        userId: member.id,
+        displayName: member.displayName,
+        role: MemberRole.member,
+        isMinor: false,
+        joinedAt: world.clock.current,
+      ),
+    );
+    await tester.pumpWidget(wrapPage(world.deps, TripDetailPage(tripId: trip.id)));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SwitchListTile), findsNothing);
+    expect(find.text(AppStrings.inviteRestricted), findsOneWidget);
+    expect(
+      tester.widget<OutlinedButton>(find.byKey(const Key('issue-invite'))).onPressed,
+      isNull,
+    );
   });
 }

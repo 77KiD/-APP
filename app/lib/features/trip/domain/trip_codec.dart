@@ -72,6 +72,7 @@ abstract final class TripCodec {
     'timeZone': trip.timeZone,
     'expectedReturnAt': trip.expectedReturnAt?.toUtc().toIso8601String(),
     'inviteCode': trip.inviteCode,
+    'publicInvite': trip.publicInvite,
     'status': trip.status.wire,
     'memberIds': trip.memberIds,
     'createdAt': trip.createdAt.toUtc().toIso8601String(),
@@ -89,6 +90,9 @@ abstract final class TripCodec {
       timeZone: '${map['timeZone']}',
       expectedReturnAt: _instant(map['expectedReturnAt']),
       inviteCode: '${map['inviteCode']}',
+      publicInvite: map['publicInvite'] is bool
+          ? map['publicInvite'] as bool
+          : true,
       status: TripStatus.parse('${map['status']}'),
       memberIds: memberIds is List
           ? [for (final item in memberIds) '$item']
@@ -159,13 +163,23 @@ abstract final class TripCodec {
     );
   }
 
-  static Map<String, dynamic> inviteToMap({
-    required String tripId,
-    required DateTime createdAt,
-  }) => {
-    'tripId': tripId,
-    'createdAt': createdAt.toUtc().toIso8601String(),
+  static Map<String, dynamic> inviteToMap(InviteRecord invite) => {
+    'code': invite.code,
+    'tripId': invite.tripId,
+    'createdBy': invite.createdBy,
+    'createdAt': invite.createdAt.toUtc().toIso8601String(),
+    'expiresAt': invite.expiresAt.toUtc().toIso8601String(),
   };
+
+  static InviteRecord inviteFromMap(Map<String, dynamic> map, {String? code}) {
+    return InviteRecord(
+      code: code ?? '${map['code']}',
+      tripId: '${map['tripId']}',
+      createdBy: '${map['createdBy'] ?? ''}',
+      createdAt: _requiredInstant(map['createdAt']),
+      expiresAt: _requiredInstant(map['expiresAt']),
+    );
+  }
 
   static Map<String, dynamic> spotToMap(ItinerarySpot spot) {
     final map = <String, dynamic>{

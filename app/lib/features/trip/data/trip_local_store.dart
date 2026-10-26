@@ -111,18 +111,47 @@ class TripLocalStore {
     });
   }
 
-  Future<void> saveInvite(String code, String tripId) {
+  Future<void> saveInvite(InviteRecord invite) {
+    final code = invite.code.trim().toUpperCase();
     return _store.transaction((draft) {
       final invites = _child(draft, 'invites');
-      invites[code] = tripId;
+      invites[code] = TripCodec.inviteToMap(
+        InviteRecord(
+          code: code,
+          tripId: invite.tripId,
+          createdBy: invite.createdBy,
+          createdAt: invite.createdAt,
+          expiresAt: invite.expiresAt,
+        ),
+      );
       draft['invites'] = invites;
     });
   }
 
-  Future<String?> readInviteTripId(String code) {
+  Future<InviteRecord?> readInvite(String code) {
     return _store.view((data) {
-      final value = _child(data, 'invites')[code];
-      return value is String ? value : null;
+      final value = _child(data, 'invites')[code.trim().toUpperCase()];
+      if (value is! Map) return null;
+      return TripCodec.inviteFromMap(
+        Map<String, dynamic>.from(value),
+        code: code.trim().toUpperCase(),
+      );
+    });
+  }
+
+  Future<List<InviteRecord>> readInvites(String tripId) {
+    return _store.view((data) {
+      final records = <InviteRecord>[];
+      for (final entry in _child(data, 'invites').entries) {
+        final value = entry.value;
+        if (value is! Map) continue;
+        final record = TripCodec.inviteFromMap(
+          Map<String, dynamic>.from(value),
+          code: entry.key,
+        );
+        if (record.tripId == tripId) records.add(record);
+      }
+      return records;
     });
   }
 

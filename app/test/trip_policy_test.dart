@@ -67,4 +67,42 @@ void main() {
     expect(TripPolicy.canAssignViceCaptain(4), isFalse);
     expect(TripPolicy.canAssignViceCaptain(5), isTrue);
   });
+
+  test('公開邀請與邀請碼滿 1 小時的邊界', () {
+    expect(
+      TripPolicy.canIssueInvite(role: MemberRole.member, publicInvite: true),
+      isTrue,
+    );
+    expect(
+      TripPolicy.canIssueInvite(role: MemberRole.member, publicInvite: false),
+      isFalse,
+    );
+    expect(
+      TripPolicy.canIssueInvite(
+        role: MemberRole.viceCaptain,
+        publicInvite: false,
+      ),
+      isTrue,
+    );
+    expect(
+      TripPolicy.canIssueInvite(role: MemberRole.captain, publicInvite: false),
+      isTrue,
+    );
+    final expires = TripPolicy.inviteExpiresAt(now);
+    expect(
+      TripPolicy.isInviteExpired(
+        expires,
+        expires.subtract(const Duration(milliseconds: 1)),
+      ),
+      isFalse,
+    );
+    expect(TripPolicy.isInviteExpired(expires, expires), isTrue);
+    expect(
+      TripPolicy.isInviteExpired(
+        expires,
+        expires.add(const Duration(milliseconds: 1)),
+      ),
+      isTrue,
+    );
+  });
 }

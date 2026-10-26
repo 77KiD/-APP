@@ -53,6 +53,7 @@ class Trip {
     required this.timeZone,
     required this.expectedReturnAt,
     required this.inviteCode,
+    this.publicInvite = true,
     required this.status,
     required this.memberIds,
     required this.createdAt,
@@ -67,6 +68,9 @@ class Trip {
   final String timeZone;
   final DateTime? expectedReturnAt;
   final String inviteCode;
+
+  /// 預設開啟。關閉後只有隊長和副隊長可以產生新的邀請碼。
+  final bool publicInvite;
   final TripStatus status;
   final List<String> memberIds;
   final DateTime createdAt;
@@ -76,6 +80,8 @@ class Trip {
     DateTime? updatedAt,
     List<String>? memberIds,
     TripStatus? status,
+    String? inviteCode,
+    bool? publicInvite,
     bool setExpectedReturn = false,
     DateTime? expectedReturnAt,
   }) {
@@ -89,7 +95,8 @@ class Trip {
       expectedReturnAt: setExpectedReturn
           ? expectedReturnAt
           : this.expectedReturnAt,
-      inviteCode: inviteCode,
+      inviteCode: inviteCode ?? this.inviteCode,
+      publicInvite: publicInvite ?? this.publicInvite,
       status: status ?? this.status,
       memberIds: memberIds ?? this.memberIds,
       createdAt: createdAt,
@@ -333,6 +340,24 @@ class LocationSnapshot {
   final String? photoUrl;
 }
 
+/// `inviteCodes/{code}`。建立後 1 小時到期。同一碼在到期前可以給多個人使用。
+/// 產生新碼不會改寫其他碼的 [expiresAt]。
+class InviteRecord {
+  const InviteRecord({
+    required this.code,
+    required this.tripId,
+    required this.createdBy,
+    required this.createdAt,
+    required this.expiresAt,
+  });
+
+  final String code;
+  final String tripId;
+  final String createdBy;
+  final DateTime createdAt;
+  final DateTime expiresAt;
+}
+
 enum SyncOpType {
   upsertTrip,
   upsertMember,
@@ -373,6 +398,10 @@ class TripAccessDenied extends TripException {
 
 class InviteNotFoundException extends TripException {
   InviteNotFoundException() : super(AppStrings.inviteNotFound);
+}
+
+class InviteExpiredException extends TripException {
+  InviteExpiredException() : super(AppStrings.inviteExpired);
 }
 
 class AlreadyMemberException extends TripException {

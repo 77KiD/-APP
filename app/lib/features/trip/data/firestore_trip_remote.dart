@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:group_trip/features/trip/data/firestore_paths.dart';
 import 'package:group_trip/features/trip/domain/trip_codec.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
+import 'package:group_trip/features/trip/domain/trip_policy.dart';
 import 'package:group_trip/features/trip/domain/trip_repository.dart';
 
 /// Firestore 實作。誰可以讀寫由安全規則決定，用戶端的檢查不是安全邊界。
@@ -92,21 +93,51 @@ class FirestoreTripRemote implements TripRemote {
   }
 
   @override
-  Future<void> upsertInvite({
-    required String code,
-    required String tripId,
-    required DateTime createdAt,
-  }) async {
+  Future<void> upsertInvite(InviteRecord invite) async {
+    final code = invite.code.trim().toUpperCase();
     await _invites.doc(code).set(
-      TripCodec.inviteToMap(tripId: tripId, createdAt: createdAt),
+      TripCodec.inviteToMap(
+        InviteRecord(
+          code: code,
+          tripId: invite.tripId,
+          createdBy: invite.createdBy,
+          createdAt: invite.createdAt,
+          expiresAt: invite.expiresAt,
+        ),
+      ),
     );
   }
 
   @override
+  Future<InviteRecord?> fetchInvite(String code) async {
+    final snap = await _invites.doc(code.trim().toUpperCase()).get();
+    final data = snap.data();
+    if (!snap.exists || data == null) return null;
+    return TripCodec.inviteFromMap(data, code: code.trim().toUpperCase());
+  }
+
+  @override
+  Future<List<InviteRecord>> fetchInvites(String tripId) async {
+    final query = await _invites.where('tripId', isEqualTo: tripId).get();
+    return [
+      for (final doc in query.docs)
+        TripCodec.inviteFromMap(doc.data(), code: doc.id),
+    ];
+  }
+
+  @override
   Future<Trip> join({required String code, required TripMember member}) async {
-    final invite = await _invites.doc(code.trim().toUpperCase()).get();
-    final tripId = invite.data()?['tripId'];
+    final normalized = code.trim().toUpperCase();
+    final invite = await _invites.doc(normalized).get();
+    final data = invite.data();
+    final tripId = data?['tripId'];
     if (!invite.exists || tripId is! String) throw InviteNotFoundException();
+    // 安全規則也必須拒絕 now >= expiresAt。用戶端擋下只是提早給出訊息。
+    final record = TripCodec.inviteFromMap(data!, code: normalized);
+    final now = await serverNow();
+    if (TripPolicy.isInviteExpired(record.expiresAt, now)) {
+      throw InviteExpiredException();
+    }
     final existing = await _trips
         .doc(tripId)
         .collection(FirestorePaths.members)
@@ -124,11 +155,11 @@ class FirestoreTripRemote implements TripRemote {
     );
     await upsertMember(saved);
     final snap = await _trips.doc(tripId).get();
-    final data = snap.data();
-    if (data == null) {
+    final tripData = snap.data();
+    if (tripData == null) {
       throw TripException('已加入旅程，但還讀不到旅程資料。請確認 Firestore 規則允許成員讀取。');
     }
-    return TripCodec.tripFromMap(data, id: tripId);
+    return TripCodec.tripFromMap(tripData, id: tripId);
   }
 
   @override

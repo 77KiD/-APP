@@ -64,7 +64,7 @@ class OfflineTripRepository implements TripRepository {
     );
     await local.saveTrip(trip);
     await local.saveMember(member);
-    await local.saveInvite(trip.inviteCode, trip.id);
+    await local.saveInvite(_issued(trip.inviteCode, trip.id, account.id, now));
     await local.enqueue(SyncOp(type: SyncOpType.upsertTrip, tripId: trip.id));
     await local.enqueue(
       SyncOp(
@@ -112,7 +112,7 @@ class OfflineTripRepository implements TripRepository {
       }
       await local.saveTrip(remoteTrip);
       await local.saveMembers(tripId, members);
-      await local.saveInvite(remoteTrip.inviteCode, remoteTrip.id);
+      await _cacheInvites(remoteTrip.id);
       return remoteTrip;
     } on TripAccessDenied {
       if (cached != null && cachedMember) return cached;
@@ -415,8 +415,71 @@ class OfflineTripRepository implements TripRepository {
     final members = await remote.fetchMembers(trip.id);
     await local.saveTrip(trip);
     await local.saveMembers(trip.id, members);
-    await local.saveInvite(code, trip.id);
+    await _cacheInvites(trip.id);
+    final used = await remote.fetchInvite(code);
+    if (used != null) await local.saveInvite(used);
     return trip;
+  }
+
+  @override
+  Future<InviteRecord> issueInviteCode(String tripId) async {
+    final account = _account();
+    final trip = await getTrip(tripId);
+    if (connectivity.isOnline) {
+      try {
+        final members = await remote.fetchMembers(tripId);
+        await local.saveMembers(tripId, members);
+      } on TripException {
+        // 用手機上已有的成員角色判斷。
+      }
+    }
+    final self = await _self(tripId);
+    if (!TripPolicy.canIssueInvite(
+      role: self.role,
+      publicInvite: trip.publicInvite,
+    )) {
+      throw RoleChangeException(AppStrings.cannotIssueInvite);
+    }
+    final now = await _stamp();
+    final invite = _issued(await _freshCode(), trip.id, account.id, now);
+    await local.saveInvite(invite);
+    await local.enqueue(
+      SyncOp(
+        type: SyncOpType.upsertInvite,
+        tripId: trip.id,
+        entityId: invite.code,
+      ),
+    );
+    await _trySync();
+    return (await local.readInvite(invite.code)) ?? invite;
+  }
+
+  @override
+  Future<Trip> setPublicInvite({
+    required String tripId,
+    required bool enabled,
+  }) async {
+    final trip = await getTrip(tripId);
+    final self = await _self(tripId);
+    if (self.role != MemberRole.captain) {
+      throw RoleChangeException(AppStrings.onlyCaptainSetsPublicInvite);
+    }
+    if (trip.publicInvite == enabled) return trip;
+    final now = await _stamp();
+    final updated = trip.copy(publicInvite: enabled, updatedAt: now);
+    await local.saveTrip(updated);
+    await local.enqueue(SyncOp(type: SyncOpType.upsertTrip, tripId: tripId));
+    await _trySync();
+    return (await local.readTrip(tripId)) ?? updated;
+  }
+
+  @override
+  Future<List<InviteRecord>> listInvites(String tripId) async {
+    await getTrip(tripId);
+    if (connectivity.isOnline) await _cacheInvites(tripId);
+    final invites = await local.readInvites(tripId);
+    invites.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return invites;
   }
 
   @override
@@ -560,12 +623,10 @@ class OfflineTripRepository implements TripRepository {
         }
       case SyncOpType.upsertInvite:
         final trip = await local.readTrip(op.tripId);
-        if (trip != null) {
-          await remote.upsertInvite(
-            code: trip.inviteCode,
-            tripId: trip.id,
-            createdAt: trip.createdAt,
-          );
+        final code = op.entityId ?? trip?.inviteCode;
+        if (code != null) {
+          final invite = await local.readInvite(code);
+          if (invite != null) await remote.upsertInvite(invite);
         }
       case SyncOpType.upsertItinerary:
         final day = await local.readItineraryDay(op.tripId, op.entityId ?? '');
@@ -603,7 +664,7 @@ class OfflineTripRepository implements TripRepository {
         }
       } else {
         await local.saveTrip(remoteTrip);
-        await local.saveInvite(remoteTrip.inviteCode, remoteTrip.id);
+        await _cacheInvites(remoteTrip.id);
         await local.saveMembers(
           remoteTrip.id,
           await remote.fetchMembers(remoteTrip.id),
@@ -618,6 +679,45 @@ class OfflineTripRepository implements TripRepository {
       for (final snapshot in remoteLocations) {
         await local.saveLocation(remoteTrip.id, snapshot);
       }
+    }
+  }
+
+  InviteRecord _issued(
+    String code,
+    String tripId,
+    String createdBy,
+    DateTime createdAt,
+  ) {
+    return InviteRecord(
+      code: code.trim().toUpperCase(),
+      tripId: tripId,
+      createdBy: createdBy,
+      createdAt: createdAt.toUtc(),
+      expiresAt: TripPolicy.inviteExpiresAt(createdAt),
+    );
+  }
+
+  Future<String> _freshCode() async {
+    for (var guard = 0; guard < 5; guard++) {
+      final code = ids.inviteCode().trim().toUpperCase();
+      if (await local.readInvite(code) != null) continue;
+      if (!connectivity.isOnline) return code;
+      try {
+        if (await remote.fetchInvite(code) == null) return code;
+      } on TripException {
+        return code;
+      }
+    }
+    return ids.inviteCode().trim().toUpperCase();
+  }
+
+  Future<void> _cacheInvites(String tripId) async {
+    try {
+      for (final invite in await remote.fetchInvites(tripId)) {
+        await local.saveInvite(invite);
+      }
+    } on TripException {
+      // 旅程資料仍可用。邀請碼剩餘時間等下次連線再補。
     }
   }
 

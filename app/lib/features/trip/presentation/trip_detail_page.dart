@@ -20,6 +20,8 @@ class TripDetailPage extends StatefulWidget {
 class _TripDetailPageState extends State<TripDetailPage> {
   Trip? _trip;
   List<TripMember> _members = [];
+  List<InviteRecord> _invites = [];
+  DateTime? _deviceNow;
   List<ModificationRequest> _requests = [];
   String? _error;
   String? _notice;
@@ -49,6 +51,8 @@ class _TripDetailPageState extends State<TripDetailPage> {
     try {
       final trip = await deps.trips.getTrip(widget.tripId);
       final members = await deps.trips.listMembers(widget.tripId);
+      final invites = await deps.trips.listInvites(widget.tripId);
+      final deviceNow = await deps.clock.now();
       final requests = await deps.trips.listRequests(widget.tripId);
       if (!mounted) return;
       if (!_prefilled && trip.expectedReturnAt != null) {
@@ -60,6 +64,8 @@ class _TripDetailPageState extends State<TripDetailPage> {
       setState(() {
         _trip = trip;
         _members = members;
+        _invites = invites;
+        _deviceNow = deviceNow;
         _requests = requests;
         _loading = false;
       });
@@ -186,12 +192,58 @@ class _TripDetailPageState extends State<TripDetailPage> {
     }
   }
 
-  Future<void> _copyInvite() async {
-    final trip = _trip;
-    if (trip == null) return;
-    await Clipboard.setData(ClipboardData(text: trip.inviteCode));
+  Future<void> _copyInvite(String code) async {
+    await Clipboard.setData(ClipboardData(text: code));
     if (!mounted) return;
     setState(() => _notice = AppStrings.copiedInvite);
+  }
+
+  Future<void> _issueInvite() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await AppScope.of(context).trips.issueInviteCode(widget.tripId);
+      if (!mounted) return;
+      setState(() => _notice = AppStrings.inviteIssued);
+      await _load();
+    } on TripException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _setPublicInvite(bool enabled) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await AppScope.of(context).trips.setPublicInvite(
+        tripId: widget.tripId,
+        enabled: enabled,
+      );
+      if (!mounted) return;
+      await _load();
+    } on TripException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  bool get _canIssueInvite {
+    final self = _self;
+    final trip = _trip;
+    if (self == null || trip == null) return false;
+    return TripPolicy.canIssueInvite(
+      role: self.role,
+      publicInvite: trip.publicInvite,
+    );
   }
 
   TripMember? get _self {
@@ -222,16 +274,45 @@ class _TripDetailPageState extends State<TripDetailPage> {
                       ? '${AppStrings.expectedReturn}：${AppStrings.expectedReturnUnset}'
                       : '${AppStrings.expectedReturn}：${TripTime.format(trip.expectedReturnAt!, trip.timeZone)}',
                 ),
-                Text('${AppStrings.inviteCode}：${trip.inviteCode}'),
-                SelectableText(
-                  trip.inviteCode,
-                  key: const Key('invite-code'),
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
+                const PageHeading(AppStrings.inviteCode),
+                if (_self?.role == MemberRole.captain)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(AppStrings.publicInvite),
+                    subtitle: const Text(AppStrings.publicInviteHelp),
+                    value: trip.publicInvite,
+                    onChanged: _busy ? null : _setPublicInvite,
+                  ),
+                for (final invite in _invites) ...[
+                  SelectableText(
+                    invite.code,
+                    key: invite.code == trip.inviteCode
+                        ? const Key('invite-code')
+                        : Key('invite-${invite.code}'),
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  Text(
+                    _deviceNow == null
+                        ? AppStrings.inviteAdvisory
+                        : AppStrings.inviteRemaining(
+                            TripPolicy.inviteRemaining(
+                              invite.expiresAt,
+                              _deviceNow!,
+                            ),
+                          ),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => _copyInvite(invite.code),
+                    child: Text(AppStrings.copyInviteCode(invite.code)),
+                  ),
+                ],
+                const Text(AppStrings.inviteAdvisory),
                 OutlinedButton(
-                  onPressed: _copyInvite,
-                  child: const Text(AppStrings.copyInvite),
+                  key: const Key('issue-invite'),
+                  onPressed: _busy || !_canIssueInvite ? null : _issueInvite,
+                  child: const Text(AppStrings.issueInvite),
                 ),
+                if (!_canIssueInvite) const Text(AppStrings.inviteRestricted),
                 if (_notice != null)
                   Semantics(liveRegion: true, child: Text(_notice!)),
                 const PageHeading(AppStrings.members),
