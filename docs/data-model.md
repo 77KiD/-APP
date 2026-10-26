@@ -56,7 +56,7 @@ trips/{tripId}
   requests/{requestId}
     type, status, proposerId, payload, createdAt, expiresAt, decidedBy, decidedAt
   itinerary/{dayId}
-    date, stops, backupStops, clientSavedAt, updatedBy, updatedAt, writeId
+    date, stops, backupStops, clientSavedAt, updatedBy, updatedAt
   itineraryHistory/{historyId}
     dayId, snapshot, clientSavedAt, updatedBy, recordedBy, outcome, createdAt
   places/{placeId}
@@ -249,7 +249,6 @@ trips/{tripId}
 | `clientSavedAt` | timestamp | 校正後的手機儲存時間。見離線同步。不可晚於伺服器現在 5 分鐘，也不可早於 400 天 |
 | `updatedBy` | string | 這次寫入的 uid |
 | `updatedAt` | timestamp | 伺服器收到的時間。排序不看這個欄位 |
-| `writeId` | string | 1–40 個英數。每次建立或更新都換一個新的。修改紀錄的文件 ID 必須是 `dayId + "_" + writeId`，例如 `2030-01-02_a1b2c3` |
 
 `stops` 與 `backupStops` 的每個元素（規則無法逐筆檢查，客戶端必須照這個形狀）：
 
@@ -262,29 +261,29 @@ trips/{tripId}
 | `latitude` / `longitude` | number \| null | 座標。超過 30 天必須改回 null |
 | `coordinatesCachedAt` | timestamp \| null | 座標寫入的時間。兩個座標都是 null 時，這個也是 null |
 
-覆蓋規則：更新時新的 `clientSavedAt` 必須 **大於或等於** 文件上的值。較舊的寫入被拒絕。相等時後送到伺服器的那次留下（重送同一筆因此可以成功，但 `writeId` 仍要換新）。`backupStops` 可以變長、變短或清空，上限 30 筆；沒有另外的縮短操作。
+客戶端可以寫入任何落在允許範圍內的 `clientSavedAt`，包含比文件上現有值更早的時間。離線的兩個人可能依不同順序送到伺服器，規則不在這裡判輸贏。`backupStops` 上限 30 筆，可以變長或變短。客戶端不要寫 `serverRestored`，那個欄位只給下面的 Cloud Function 用。
 
-每一次建立或更新 `itinerary/{dayId}` 都必須和一筆 `itineraryHistory` 放在**同一個 batch 或 transaction**。只寫行程、或紀錄內容對不上，整筆會被拒絕。
+修改紀錄不由客戶端寫。ADR 0004 是離線優先；若要求客戶端在同一個 batch 裡帶歷史，會和離線佇列打架。`recordItineraryRevision`（Firestore v2 `onDocumentWrittenWithAuthContext`，`asia-east1`）在行程文件寫入之後處理。一般的 `onDocumentWritten` 拿不到寫入者，所以用帶 auth context 的版本，`recordedBy` 才是 uid。
 
-- 修改紀錄的文件 ID 是 `dayId_writeId`（中間一個底線）。
-- `outcome` 是 `superseded`。`recordedBy` 是現在的使用者。`createdAt` 是 `serverTimestamp()`。
-- 紀錄保存的是**寫入前**的那一版，不是寫入後的新內容。`snapshot` 只含 `stops`、`backupStops`、`clientSavedAt`、`updatedBy`。文件上的 `clientSavedAt`、`updatedBy` 與 snapshot 裡的同名欄位相同。
-- 第一次建立當天文件時，上一版是空的：`snapshot` 為 `{ stops: [], backupStops: [], clientSavedAt: null, updatedBy: null }`，文件上的 `clientSavedAt` 與 `updatedBy` 也是 null。
-- 更新時，snapshot 必須等於伺服器上現有的 `stops`、`backupStops`、`clientSavedAt`、`updatedBy`。
-- 自己的寫入因為比較舊而被拒時，不要改行程文件，另寫一筆 `outcome = "lost"`（不必跟行程放在同一個 batch）。`lost` 的 snapshot 是沒被採用的那一版，`clientSavedAt` 不可為 null。
+- 用校正後的 `clientSavedAt` 做最後寫入勝出，比較方式和 `functions/src/clockCorrection.ts` 的 `incomingCorrectedSaveWins` 相同。時間相同時，後送到的那次留下。
+- 新的版本較新：行程文件維持這次寫入，函數把**上一版**寫進 `itineraryHistory`，`outcome = superseded`。
+- 新的版本較舊：函數把這次寫入記成 `outcome = lost`，再把上一版寫回行程文件，並暫時標上 `serverRestored: true`。寫回放在交易裡，會再讀一次當天文件；若內容已經不是這次落敗的版本，就不覆蓋。下一次觸發看到 `serverRestored` 就只把標記刪掉。標記刪掉後內容與還原前相同，不再記歷史，避免迴圈。
+- 第一次建立當天文件沒有上一版，不寫歷史。內容相同的重送也不寫。刪除當天文件（客戶端規則不允許）也不寫。
+- 歷史文件 ID 是這次 Cloud Event 的 id（`/` 換成 `_`）。同一事件重試不會再插一筆。
+- 勝出的那一版整份留下，包含它的 `backupStops`。落敗的那一版（含它自己的 `backupStops`）在修改紀錄裡。
 
 ### itineraryHistory/{historyId}
 
-只能新增，不能改、不能刪（刪帳號時由 Admin SDK 處理）。旅程結束後仍可補寫，避免離線佇列裡的舊版消失。
+只有 Cloud Function 用 Admin SDK 寫入。成員可以讀。客戶端不能建立、更新或刪除。
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
 | `dayId` | string | `YYYY-MM-DD` |
-| `snapshot` | map | 寫入前的那一版，鍵只有 `stops`、`backupStops`、`clientSavedAt`、`updatedBy`。第一次建立當天行程時，兩個清單是空的，時間與 `updatedBy` 是 null |
-| `clientSavedAt` | timestamp \| null | 等於 snapshot 裡的 `clientSavedAt`。上一版不存在時是 null |
-| `updatedBy` | string \| null | 等於 snapshot 裡的 `updatedBy`。上一版不存在時是 null |
-| `recordedBy` | string | 把紀錄寫進來的 uid，必須是現在的使用者 |
-| `outcome` | `"superseded"` \| `"lost"` | `superseded`：同一個 batch 已寫上行程，這裡是上一版，文件 ID 必須是 `dayId_writeId`。`lost`：這次較舊，沒有蓋過行程 |
+| `snapshot` | map | 被蓋過或沒被採用的那一版，鍵是 `stops`、`backupStops`、`clientSavedAt`、`updatedBy` |
+| `clientSavedAt` | timestamp | 等於 snapshot 裡的 `clientSavedAt` |
+| `updatedBy` | string | 等於 snapshot 裡的 `updatedBy` |
+| `recordedBy` | string | 觸發這次寫入的 uid（`authId`）。沒有 auth 時是 `server` |
+| `outcome` | `"superseded"` \| `"lost"` | `superseded`：上一版被較新的校正時間蓋過。`lost`：這次送到的版本比較舊，行程已還原成上一版 |
 | `createdAt` | timestamp | 伺服器時間 |
 
 ## places/{placeId} 與 votes/{uid}

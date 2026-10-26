@@ -22,14 +22,6 @@ service cloud.firestore {
       return /databases/$(database)/documents/invites/$(code);
     }
 
-    function dayDocPath(tripId, dayId) {
-      return /databases/$(database)/documents/trips/$(tripId)/itinerary/$(dayId);
-    }
-
-    function dayHistoryPath(tripId, historyId) {
-      return /databases/$(database)/documents/trips/$(tripId)/itineraryHistory/$(historyId);
-    }
-
     function registered() {
       return signedIn() && exists(userPath(request.auth.uid));
     }
@@ -121,43 +113,6 @@ service cloud.firestore {
       return value is timestamp
         && value <= request.time + duration.value(5, 'm')
         && value >= request.time - duration.value(400, 'd');
-    }
-
-    function validWriteId(value) {
-      return value is string && value.matches('^[A-Za-z0-9]{1,40}$');
-    }
-
-    // history id is dayId + "_" + writeId. The history doc must be created in this
-    // request and its snapshot must be the day as it existed before the write.
-    // A first create records an empty prior version.
-    function historyPaired(tripId, dayId) {
-      let historyId = dayId + "_" + request.resource.data.writeId;
-      let history = getAfter(dayHistoryPath(tripId, historyId)).data;
-      return existsAfter(dayHistoryPath(tripId, historyId))
-        && !exists(dayHistoryPath(tripId, historyId))
-        && history.dayId == dayId
-        && history.outcome == "superseded"
-        && history.recordedBy == request.auth.uid
-        && history.createdAt == request.time
-        && (
-          resource == null
-            ? (
-              history.clientSavedAt == null
-              && history.updatedBy == null
-              && history.snapshot.stops.size() == 0
-              && history.snapshot.backupStops.size() == 0
-              && history.snapshot.clientSavedAt == null
-              && history.snapshot.updatedBy == null
-            )
-            : (
-              history.clientSavedAt == resource.data.clientSavedAt
-              && history.updatedBy == resource.data.updatedBy
-              && history.snapshot.stops == resource.data.stops
-              && history.snapshot.backupStops == resource.data.backupStops
-              && history.snapshot.clientSavedAt == resource.data.clientSavedAt
-              && history.snapshot.updatedBy == resource.data.updatedBy
-            )
-        );
     }
 
     function tripKeysOk(data) {
@@ -630,7 +585,7 @@ service cloud.firestore {
           && tripOpen(tripId)
           && dayId.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
           && request.resource.data.keys().hasOnly([
-            "date", "stops", "backupStops", "clientSavedAt", "updatedBy", "updatedAt", "writeId"
+            "date", "stops", "backupStops", "clientSavedAt", "updatedBy", "updatedAt"
           ])
           && request.resource.data.date == dayId
           && request.resource.data.stops is list
@@ -639,14 +594,12 @@ service cloud.firestore {
           && request.resource.data.backupStops.size() <= 30
           && validClientSavedAt(request.resource.data.clientSavedAt)
           && request.resource.data.updatedBy == request.auth.uid
-          && request.resource.data.updatedAt == request.time
-          && validWriteId(request.resource.data.writeId)
-          && historyPaired(tripId, dayId);
+          && request.resource.data.updatedAt == request.time;
 
         allow update: if isMember(tripId)
           && tripOpen(tripId)
           && request.resource.data.keys().hasOnly([
-            "date", "stops", "backupStops", "clientSavedAt", "updatedBy", "updatedAt", "writeId"
+            "date", "stops", "backupStops", "clientSavedAt", "updatedBy", "updatedAt"
           ])
           && request.resource.data.date == dayId
           && resource.data.date == dayId
@@ -655,57 +608,15 @@ service cloud.firestore {
           && request.resource.data.backupStops is list
           && request.resource.data.backupStops.size() <= 30
           && validClientSavedAt(request.resource.data.clientSavedAt)
-          && request.resource.data.clientSavedAt >= resource.data.clientSavedAt
           && request.resource.data.updatedBy == request.auth.uid
-          && request.resource.data.updatedAt == request.time
-          && validWriteId(request.resource.data.writeId)
-          && historyPaired(tripId, dayId);
+          && request.resource.data.updatedAt == request.time;
 
         allow delete: if false;
       }
 
       match /itineraryHistory/{historyId} {
         allow get, list: if isMember(tripId);
-        allow create: if isMember(tripId)
-          && request.resource.data.keys().hasOnly([
-            "dayId", "snapshot", "clientSavedAt", "updatedBy", "recordedBy", "outcome", "createdAt"
-          ])
-          && request.resource.data.dayId is string
-          && request.resource.data.dayId.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-          && request.resource.data.snapshot is map
-          && request.resource.data.snapshot.keys().hasOnly([
-            "stops", "backupStops", "clientSavedAt", "updatedBy"
-          ])
-          && request.resource.data.snapshot.stops is list
-          && request.resource.data.snapshot.stops.size() <= 5
-          && request.resource.data.snapshot.backupStops is list
-          && request.resource.data.snapshot.backupStops.size() <= 30
-          && request.resource.data.clientSavedAt == request.resource.data.snapshot.clientSavedAt
-          && request.resource.data.updatedBy == request.resource.data.snapshot.updatedBy
-          && request.resource.data.recordedBy == request.auth.uid
-          && request.resource.data.outcome in ["superseded", "lost"]
-          && request.resource.data.createdAt == request.time
-          && (
-            (
-              request.resource.data.outcome == "superseded"
-              && request.resource.data.clientSavedAt == null
-              && request.resource.data.updatedBy == null
-            )
-            || (
-              validClientSavedAt(request.resource.data.clientSavedAt)
-              && request.resource.data.updatedBy is string
-              && request.resource.data.updatedBy.size() > 0
-              && request.resource.data.updatedBy.size() <= 128
-            )
-          )
-          && (
-            request.resource.data.outcome == "lost"
-            || (
-              request.resource.data.outcome == "superseded"
-              && historyId == request.resource.data.dayId + "_" + getAfter(dayDocPath(tripId, request.resource.data.dayId)).data.writeId
-            )
-          );
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
 
       match /places/{placeId} {
