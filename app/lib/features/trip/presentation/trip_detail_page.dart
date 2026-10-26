@@ -275,7 +275,7 @@ class _TripDetailPageState extends State<TripDetailPage> {
                       : '${AppStrings.expectedReturn}：${TripTime.format(trip.expectedReturnAt!, trip.timeZone)}',
                 ),
                 const PageHeading(AppStrings.inviteCode),
-                if (_self?.role == MemberRole.captain)
+                if (TripPolicy.canTogglePublicInvite(_self?.role))
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text(AppStrings.publicInvite),
@@ -292,7 +292,12 @@ class _TripDetailPageState extends State<TripDetailPage> {
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   Text(
-                    _deviceNow == null
+                    TripPolicy.memberInviteBlocked(
+                      publicInvite: trip.publicInvite,
+                      issuerRole: invite.issuerRole,
+                    )
+                        ? AppStrings.inviteClosedByPublicInvite
+                        : _deviceNow == null
                         ? AppStrings.inviteAdvisory
                         : AppStrings.inviteRemaining(
                             TripPolicy.inviteRemaining(

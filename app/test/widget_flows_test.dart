@@ -262,4 +262,56 @@ void main() {
       isNull,
     );
   });
+
+  testWidgets('副隊長可以關閉公開邀請', (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final world = TestWorld();
+    await world.auth.signUp(
+      email: 'ada@example.com',
+      password: 'password1',
+      displayName: '小美',
+      birthday: '2000-01-01',
+      birthdayConsent: true,
+      today: world.clock.current,
+    );
+    final trip = await world.trips.createTrip(
+      const NewTripForm(
+        title: '測試團',
+        startDate: '2026-12-01',
+        endDate: '2026-12-03',
+        timeZone: 'Asia/Taipei',
+        returnDate: '',
+        returnTime: '',
+      ),
+    );
+    final vice = (await world.auth.signUp(
+      email: 'vice@example.com',
+      password: 'password1',
+      displayName: '阿強',
+      birthday: '2000-01-01',
+      birthdayConsent: true,
+      today: world.clock.current,
+    )).account!;
+    await world.remote.upsertMember(
+      TripMember(
+        tripId: trip.id,
+        userId: vice.id,
+        displayName: vice.displayName,
+        role: MemberRole.viceCaptain,
+        isMinor: false,
+        joinedAt: world.clock.current,
+      ),
+    );
+    await tester.pumpWidget(wrapPage(world.deps, TripDetailPage(tripId: trip.id)));
+    await tester.pumpAndSettle();
+    expect(find.byType(SwitchListTile), findsOneWidget);
+    await tester.ensureVisible(find.byType(SwitchListTile));
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    expect((await world.trips.getTrip(trip.id)).publicInvite, isFalse);
+    expect(find.text(AppStrings.roleVice), findsWidgets);
+  });
 }

@@ -347,6 +347,7 @@ class InviteRecord {
     required this.code,
     required this.tripId,
     required this.createdBy,
+    required this.issuerRole,
     required this.createdAt,
     required this.expiresAt,
   });
@@ -354,6 +355,9 @@ class InviteRecord {
   final String code;
   final String tripId;
   final String createdBy;
+
+  /// 產生這個碼當時的角色。之後升職或降職不會改這欄。
+  final MemberRole issuerRole;
   final DateTime createdAt;
   final DateTime expiresAt;
 }
@@ -402,6 +406,10 @@ class InviteNotFoundException extends TripException {
 
 class InviteExpiredException extends TripException {
   InviteExpiredException() : super(AppStrings.inviteExpired);
+}
+
+class InviteClosedException extends TripException {
+  InviteClosedException() : super(AppStrings.inviteClosedByPublicInvite);
 }
 
 class AlreadyMemberException extends TripException {

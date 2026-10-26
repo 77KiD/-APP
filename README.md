@@ -54,12 +54,12 @@ flutter run \
 | `trips/{tripId}/itineraryHistory/{id}` | 被覆蓋的行程版本。 |
 | `trips/{tripId}/locations/{uid}` | 位置快照形狀。這一版沒有發送定位。 |
 | `trips/{tripId}/handover/{id}`、`trips/{tripId}/soloNotices/{id}` | 交接與單獨行動的形狀。流程不在 #3。 |
-| `inviteCodes/{CODE}` | `tripId`、`createdBy`、`createdAt`、`expiresAt`（建立後 1 小時）。非成員用邀請碼加入時先查這層。同一個碼在到期前可以給多個人用。新碼不會改寫其他碼。 |
+| `inviteCodes/{CODE}` | `tripId`、`createdBy`、`issuerRole`（產生當下的角色）、`createdAt`、`expiresAt`（建立後 1 小時）。非成員用邀請碼加入時先查這層。同一個碼在到期前可以給多個人用。新碼不會改寫其他碼。 |
 | `_meta/clock` | 登入使用者寫入 `FieldValue.serverTimestamp()`，給 ADR 0004 的校正時鐘。不含個資。 |
 
 角色在畫面上是隊長、副隊長、一般成員。一般成員改預計回程時間會送修改申請；隊長與副隊長直接寫入。不能改成比現在早。副隊長最多一位，而且只有成員至少 5 人、由隊長指定。8 人以上沒有副隊長時，介面會說明還不能開始，這一版沒有「開始旅程」按鈕。
 
-公開邀請預設開啟，任何成員都可以產生邀請碼。隊長關掉之後，只有隊長和副隊長可以產生；一般成員的按鈕會停用，並說明原因。畫面上的剩餘時間依這台手機估算，只供參考。加入時是否過期以伺服器時間與 `expiresAt` 為準。
+公開邀請預設開啟，任何成員都可以產生邀請碼。隊長或副隊長關掉之後，只有隊長和副隊長可以產生新碼；一般成員已經產生的邀請碼立刻不能加入，隊長和副隊長產生的碼仍用到各自的 `expiresAt`。再打開公開邀請後，還沒到期的一般成員碼可以恢復使用。產生新碼不會改寫其他碼。一般成員的按鈕會停用，並說明原因。畫面上的剩餘時間依這台手機估算，只供參考。加入時是否過期以伺服器時間與 `expiresAt` 為準；公開邀請關閉時，還要看 `issuerRole`。
 
 離線時先寫本機 JSON，恢復連線再送出。行程以校正後的 `updatedAt` 後寫入勝出，落敗的版本進 `itineraryHistory`。離線快取只留行程名稱、順序、時間、`place_id` 與座標；座標以 UTC 日曆日計算，滿 30 日刪除，名稱與 `place_id` 保留。不快取 Google 路線、交通時間或地圖圖磚。
 
@@ -75,7 +75,7 @@ CI（`.github/workflows/flutter.yml`）在 Flutter 3.47.8 上跑 `flutter analyz
 ## 留給後端
 
 - Firebase 專案、Auth、Firestore，以及真正的 `google-services.json`（不要提交）。
-- 安全規則：非成員不能讀旅程；生日只在 `users`；成員文件沒有生日；`inviteCodes/{code}` 讓已登入者讀得到該碼以便加入，但讀不到行程；列出某旅程的邀請碼只限成員。加入時必須用伺服器時間拒絕 `request.time >= expiresAt`。寫入時 `expiresAt` 不得晚於 `createdAt` 加 1 小時。`publicInvite == false` 時，只有隊長和副隊長可以新增邀請碼。`_meta/clock` 允許已登入使用者寫入伺服器時間戳、不能寫個資。用戶端檢查不是安全邊界。
+- 安全規則：非成員不能讀旅程；生日只在 `users`；成員文件沒有生日；`inviteCodes/{code}` 讓已登入者讀得到該碼以便加入，但讀不到行程；列出某旅程的邀請碼只限成員。加入時必須用伺服器時間拒絕 `request.time >= expiresAt`。寫入時 `expiresAt` 不得晚於 `createdAt` 加 1 小時。`publicInvite == false` 時，只有隊長和副隊長可以新增邀請碼，而且要拒絕經由 `issuerRole` 不是隊長或副隊長的邀請碼加入。隊長和副隊長都可以改 `publicInvite`。`_meta/clock` 允許已登入使用者寫入伺服器時間戳、不能寫個資。用戶端檢查不是安全邊界。
 - Cloud Functions：修改申請到期、旅程在預計回程時間（或沒填時的結束日 23:59，旅程時區）結束並清位置、刪除帳號、8 人以上沒有副隊長不能開始。
 - 模擬器加規則的 CI。用戶端測試用假實作，對應 issue #1 允許的做法。
 - FCM、Maps 金鑰、發送定位。這一版不收集 FCM 權杖，也沒有背景定位。

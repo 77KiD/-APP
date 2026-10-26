@@ -83,12 +83,13 @@ abstract final class AppStrings {
   static const inviteIssued = '已產生新的邀請碼。較早的邀請碼在各自的 1 小時內仍然有效。';
   static const publicInvite = '公開邀請';
   static const publicInviteHelp =
-      '開啟時，任何成員都可以產生邀請碼。關閉後，只有隊長和副隊長可以產生。';
+      '開啟時，任何成員都可以產生邀請碼。關閉後，只有隊長和副隊長可以產生，一般成員已經產生的邀請碼會立刻失效。隊長和副隊長產生的邀請碼仍用到各自的到期時間。隊長和副隊長都可以切換這項設定。';
   static const inviteRestricted =
-      '隊長已關閉公開邀請。現在只有隊長和副隊長可以產生邀請碼。';
-  static const cannotIssueInvite =
-      '隊長已關閉公開邀請。現在只有隊長和副隊長可以產生邀請碼。';
-  static const onlyCaptainSetsPublicInvite = '只有隊長可以變更公開邀請';
+      '公開邀請已關閉。現在只有隊長和副隊長可以產生邀請碼。一般成員已經產生的邀請碼已失效。';
+  static const cannotIssueInvite = inviteRestricted;
+  static const inviteClosedByPublicInvite =
+      '公開邀請已關閉，一般成員產生的邀請碼已失效';
+  static const onlyLeadersSetPublicInvite = '只有隊長和副隊長可以變更公開邀請';
   static const inviteAdvisory = '剩餘時間依這台手機估算，實際是否過期以伺服器時間為準。';
   static String copyInviteCode(String code) => '複製邀請碼 $code';
 
