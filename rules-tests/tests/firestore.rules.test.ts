@@ -1029,3 +1029,35 @@ describe("invite expiry and invitesOpen", () => {
     await assertSucceeds(join("fresh-guest", "DEPUTYCD3"));
   });
 });
+
+describe("clock probe", () => {
+  it("lets only the owner write and read t equal to request.time", async () => {
+    const uid = "probe-owner";
+    const path = `clockProbes/${uid}`;
+    const localBefore = Date.now();
+    await assertSucceeds(setDoc(doc(db(uid), path), { t: serverTimestamp() }));
+    const saved = await assertSucceeds(getDoc(doc(db(uid), path)));
+    const serverT = saved.get("t") as Timestamp;
+    assert.deepEqual(Object.keys(saved.data() ?? {}), ["t"]);
+    assert.ok(Math.abs(serverT.toMillis() - localBefore) < 2 * 60 * 1000);
+    const offsetMs = serverT.toMillis() - Date.now();
+    assert.ok(Math.abs(offsetMs) < 2 * 60 * 1000);
+
+    await assertSucceeds(updateDoc(doc(db(uid), path), { t: serverTimestamp() }));
+    await assertFails(setDoc(doc(db("fresh-probe"), "clockProbes/fresh-probe"), { t: Timestamp.fromMillis(Date.now()) }));
+    await assertFails(setDoc(doc(db(uid), path), { t: Timestamp.fromMillis(Date.now()) }));
+    await assertFails(setDoc(doc(db(uid), path), { t: serverTimestamp(), extra: true }));
+    await assertFails(updateDoc(doc(db(uid), path), { note: "no" }));
+    await assertFails(deleteDoc(doc(db(uid), path)));
+    await assertFails(getDocs(collection(db(uid), "clockProbes")));
+
+    await assertFails(getDoc(doc(db("other-probe"), path)));
+    await assertFails(setDoc(doc(db("other-probe"), path), { t: serverTimestamp() }));
+    await assertSucceeds(setDoc(doc(db("other-probe"), "clockProbes/other-probe"), { t: serverTimestamp() }));
+    await assertFails(getDoc(doc(db(uid), "clockProbes/other-probe")));
+
+    const anon = testEnv.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(anon, path)));
+    await assertFails(setDoc(doc(anon, path), { t: serverTimestamp() }));
+  });
+});
