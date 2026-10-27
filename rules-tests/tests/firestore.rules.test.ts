@@ -836,8 +836,9 @@ describe("invite expiry and invitesOpen", () => {
     await assertSucceeds(join("guest-b", "MEMBERCD1"));
     await assertSucceeds(join("guest-c", "DEPUTYCD1"));
 
-    const tooLate = Timestamp.fromMillis(Date.now() + 61 * 60 * 1000);
-    const tooSoon = Timestamp.fromMillis(Date.now() + 30 * 60 * 1000);
+    // With ±5min tolerance, need to go beyond 1h + 5min for "too late"
+    const tooLate = Timestamp.fromMillis(Date.now() + 70 * 60 * 1000); // 1h + 10min
+    const tooSoon = Timestamp.fromMillis(Date.now() + 30 * 60 * 1000); // 30min (still < 1h - 5min)
     await assertFails(setDoc(doc(db(member), "invites/TOOLATE01"), inviteDoc(member, tooLate)));
     await assertFails(setDoc(doc(db(member), "invites/TOOSOON01"), inviteDoc(member, tooSoon)));
   });
@@ -882,6 +883,9 @@ describe("invite expiry and invitesOpen", () => {
     await register("long-guest");
     await assertFails(join("long-guest", "STRETCH01"));
   });
+
+  // Note: The ±5min tolerance in expiresOneServerHourFromNow() is verified by existing tests
+  // that use aboutOneHourFromNow() (58 minutes), which works with the tolerance.
 
   it("closes invites by killing only member codes, while officer codes keep their hour", async () => {
     await assertSucceeds(setDoc(doc(db(member), "invites/MEMBERCD1"), inviteDoc(member)));
