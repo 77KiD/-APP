@@ -10,7 +10,7 @@ Firestore 地區是 **asia-east1**（台灣）。地區在建立資料庫時指�
 firebase firestore:databases:create "(default)" --location=asia-east1
 ```
 
-`.firebaserc` 的 `replace-with-firebase-project-id` 是占位，不要提交真實金鑰、`google-services.json` 或服務帳戶 JSON。
+`.firebaserc` 的預設專案是 `peers-bea4b`（Spark，Firestore Standard，asia-east1）。不要提交真實金鑰、`google-services.json` 或服務帳戶 JSON。規則與索引由 `.github/workflows/deploy-rules.yml` 部署，認證用 GitHub secret `FIREBASE_SERVICE_ACCOUNT`。Spark 不能跑 Cloud Functions，所以這個流程不部署函式，也沒有 Realtime Database。
 
 ## 年齡
 
