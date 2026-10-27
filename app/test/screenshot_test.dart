@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,24 +33,10 @@ void main() {
       ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Variable.ttf'));
     await notoFallbackDMSans.load();
     
-    // Load MaterialIcons from Flutter SDK
-    final materialIconsPath = '${Directory.current.path}/../flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf';
-    final materialIconsFile = File(materialIconsPath);
-    
-    if (await materialIconsFile.exists()) {
-      final materialIconsLoader = FontLoader('MaterialIcons')
-        ..addFont(Future.value(await materialIconsFile.readAsBytes()).then((bytes) => ByteData.view(Uint8List.fromList(bytes).buffer)));
-      await materialIconsLoader.load();
-    } else {
-      // Try alternative path (in tmp where we installed Flutter)
-      final altPath = '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf';
-      final altFile = File(altPath);
-      if (await altFile.exists()) {
-        final materialIconsLoader = FontLoader('MaterialIcons')
-          ..addFont(Future.value(await altFile.readAsBytes()).then((bytes) => ByteData.view(Uint8List.fromList(bytes).buffer)));
-        await materialIconsLoader.load();
-      }
-    }
+    // Load MaterialIcons from bundled assets (ensures consistency across environments)
+    final materialIconsLoader = FontLoader('MaterialIcons')
+      ..addFont(rootBundle.load('assets/fonts/MaterialIcons-Regular.otf'));
+    await materialIconsLoader.load();
   });
 
   testWidgets('Screenshot: Light theme 100%', (WidgetTester tester) async {
