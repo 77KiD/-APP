@@ -31,6 +31,11 @@ export function deviceRebootedSinceSync(anchor: SyncAnchor, sample: ClockSample)
   return sample.elapsedRealtimeNowMs < anchor.elapsedRealtimeAtSyncMs;
 }
 
+/** Last-write-wins on corrected clientSavedAt. An equal timestamp keeps the incoming write. */
+export function incomingCorrectedSaveWins(incomingMs: number, existingMs: number): boolean {
+  return incomingMs >= existingMs;
+}
+
 export function correctedClientSavedAtMs(anchor: SyncAnchor, sample: ClockSample): number {
   if (!deviceRebootedSinceSync(anchor, sample)) {
     return anchor.updatedAtMs + (sample.elapsedRealtimeNowMs - anchor.elapsedRealtimeAtSyncMs);

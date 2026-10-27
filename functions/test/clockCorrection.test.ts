@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   clockOffsetMs,
   correctedClientSavedAtMs,
+  incomingCorrectedSaveWins,
   type SyncAnchor,
 } from "../src/clockCorrection";
 
@@ -47,5 +48,8 @@ describe("correctedClientSavedAtMs", () => {
       phoneWallClockNowMs: 0,
     });
     assert.ok(ten > nine);
+    assert.equal(incomingCorrectedSaveWins(ten, nine), true);
+    assert.equal(incomingCorrectedSaveWins(nine, ten), false);
+    assert.equal(incomingCorrectedSaveWins(ten, ten), true);
   });
 });

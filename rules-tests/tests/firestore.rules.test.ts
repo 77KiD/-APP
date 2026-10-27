@@ -664,69 +664,131 @@ describe("change requests", () => {
   });
 });
 
-describe("itinerary conflict and history", () => {
+describe("itinerary days and server-written history", () => {
   beforeEach(async () => {
     await seedOpenTrip();
   });
 
-  it("keeps the newest corrected clientSavedAt and rejects non-members", async () => {
-    const dayPath = `trips/${tripId}/itinerary/2030-01-02`;
-    const firstSaved = Timestamp.fromDate(new Date(Date.now() - 60_000));
-    const stops = [{ place_id: "ChIJkyoto", name: "清水寺", order: 0 }];
-    const day = (clientSavedAt: Timestamp, updatedBy: string, nextStops = stops) => ({
-      date: "2030-01-02",
-      stops: nextStops,
-      backupStops: [],
+  function dayDoc(
+    dayId: string,
+    updatedBy: string,
+    clientSavedAt: Timestamp,
+    extra: Record<string, unknown> = {},
+  ) {
+    return {
+      date: dayId,
+      stops: [{ place_id: "ChIJkyoto", name: "清水寺", order: 0 }],
+      backupStops: [] as unknown[],
       clientSavedAt,
       updatedBy,
       updatedAt: serverTimestamp(),
-    });
-    await assertFails(setDoc(doc(db(outsider), dayPath), day(firstSaved, member)));
-    await assertSucceeds(setDoc(doc(db(member), dayPath), day(firstSaved, member)));
-    await assertSucceeds(setDoc(doc(db(member), dayPath), day(firstSaved, member)));
-    await assertFails(
-      setDoc(doc(db(leader), dayPath), day(Timestamp.fromDate(new Date(Date.now() - 86_400_000)), leader)),
-    );
-    await assertSucceeds(
-      setDoc(doc(db(leader), dayPath), day(Timestamp.fromDate(new Date(Date.now() - 5_000)), leader, [])),
-    );
-    await assertFails(
-      setDoc(doc(db(leader), `trips/${tripId}/itinerary/2030-01-03`), {
-        ...day(Timestamp.fromDate(new Date(Date.now() + 60 * 60 * 1000)), leader),
-        date: "2030-01-03",
-      }),
-    );
+      ...extra,
+    };
+  }
 
-    const history = `trips/${tripId}/itineraryHistory/h1`;
-    await assertSucceeds(
-      setDoc(doc(db(leader), history), {
-        dayId: "2030-01-02",
-        snapshot: { stops, clientSavedAt: firstSaved },
-        clientSavedAt: firstSaved,
-        updatedBy: member,
-        recordedBy: leader,
-        outcome: "superseded",
-        createdAt: serverTimestamp(),
-      }),
+  it("lets a member write a day without history", async () => {
+    const dayId = "2030-01-02";
+    const dayPath = `trips/${tripId}/itinerary/${dayId}`;
+    const saved = Timestamp.fromDate(new Date(Date.now() - 60_000));
+    await assertFails(setDoc(doc(db(outsider), dayPath), dayDoc(dayId, outsider, saved)));
+
+    const memberDb = db(member);
+    const withHistory = writeBatch(memberDb);
+    withHistory.set(doc(memberDb, dayPath), dayDoc(dayId, member, saved));
+    withHistory.set(doc(memberDb, `trips/${tripId}/itineraryHistory/${dayId}_client`), {
+      dayId,
+      snapshot: { stops: [], backupStops: [], clientSavedAt: saved, updatedBy: member },
+      clientSavedAt: saved,
+      updatedBy: member,
+      recordedBy: member,
+      outcome: "superseded",
+      createdAt: serverTimestamp(),
+    });
+    await assertFails(withHistory.commit());
+
+    await assertSucceeds(setDoc(doc(db(member), dayPath), dayDoc(dayId, member, saved)));
+    const history = await assertSucceeds(getDocs(collection(db(member), `trips/${tripId}/itineraryHistory`)));
+    assert.equal(history.size, 0);
+
+    const future = Timestamp.fromDate(new Date(Date.now() + 60 * 60 * 1000));
+    await assertFails(setDoc(doc(db(member), dayPath), dayDoc(dayId, member, future)));
+    await assertFails(
+      setDoc(doc(db(member), `trips/${tripId}/itinerary/2030-01-03`), dayDoc("2030-01-03", member, saved, { serverRestored: true })),
     );
-    await assertFails(updateDoc(doc(db(leader), history), { outcome: "lost" }));
-    await assertFails(getDoc(doc(db(outsider), history)));
-    await assertSucceeds(getDoc(doc(db(member), history)));
   });
 
-  it("caps a day at 5 stops", async () => {
+  it("allows an older clientSavedAt so the revision function can see it", async () => {
+    const dayId = "2030-01-02";
+    const dayPath = `trips/${tripId}/itinerary/${dayId}`;
+    const newer = Timestamp.fromDate(new Date(Date.now() - 5_000));
+    const older = Timestamp.fromDate(new Date(Date.now() - 86_400_000));
+    await assertSucceeds(setDoc(doc(db(member), dayPath), dayDoc(dayId, member, newer, {
+      backupStops: [{ place_id: "a", name: "備選甲", order: 0 }],
+    })));
+    await assertSucceeds(setDoc(doc(db(leader), dayPath), dayDoc(dayId, leader, older, { backupStops: [] })));
+    const stored = await assertSucceeds(getDoc(doc(db(member), dayPath)));
+    assert.equal(stored.get("updatedBy"), leader);
+    assert.equal(stored.get("backupStops").length, 0);
+  });
+
+  it("lets backupStops grow or shrink and caps stops at 5", async () => {
+    const dayId = "2030-01-06";
+    const dayPath = `trips/${tripId}/itinerary/${dayId}`;
+    const saved = Timestamp.fromDate(new Date(Date.now() - 20_000));
+    const backups = [
+      { place_id: "a", name: "備選甲", order: 0 },
+      { place_id: "b", name: "備選乙", order: 1 },
+    ];
+    await assertSucceeds(setDoc(doc(db(member), dayPath), dayDoc(dayId, member, saved, { backupStops: backups })));
+    const later = Timestamp.fromDate(new Date(Date.now() - 5_000));
+    await assertSucceeds(setDoc(doc(db(member), dayPath), dayDoc(dayId, member, later, { backupStops: [] })));
+    const stored = await assertSucceeds(getDoc(doc(db(member), dayPath)));
+    assert.equal(stored.get("backupStops").length, 0);
+
+    const tooManyBackups = Array.from({ length: 31 }, (_, order) => ({ place_id: `b${order}`, name: "備選", order }));
+    await assertFails(setDoc(doc(db(member), dayPath), dayDoc(dayId, member, later, { backupStops: tooManyBackups })));
+
     const stops = (count: number) =>
       Array.from({ length: count }, (_, order) => ({ place_id: `p${order}`, name: "景點", order }));
-    const base = (count: number) => ({
-      date: "2030-01-04",
-      stops: stops(count),
-      backupStops: [],
-      clientSavedAt: Timestamp.fromDate(new Date(Date.now() - 5_000)),
+    await assertFails(
+      setDoc(doc(db(member), `trips/${tripId}/itinerary/2030-01-04`), dayDoc("2030-01-04", member, saved, { stops: stops(6) })),
+    );
+    await assertSucceeds(
+      setDoc(doc(db(member), `trips/${tripId}/itinerary/2030-01-04`), dayDoc("2030-01-04", member, saved, { stops: stops(5) })),
+    );
+  });
+
+  it("lets members read itinerary history and rejects client writes", async () => {
+    const historyPath = `trips/${tripId}/itineraryHistory/projects_demo_events_evt-1`;
+    const saved = Timestamp.fromDate(new Date(Date.now() - 60_000));
+    const history = {
+      dayId: "2030-01-02",
+      snapshot: {
+        stops: [],
+        backupStops: [{ place_id: "a", name: "備選甲", order: 0 }],
+        clientSavedAt: saved,
+        updatedBy: member,
+      },
+      clientSavedAt: saved,
       updatedBy: member,
-      updatedAt: serverTimestamp(),
+      recordedBy: "server",
+      outcome: "lost",
+      createdAt: saved,
+    };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), historyPath), history);
     });
-    await assertFails(setDoc(doc(db(member), `trips/${tripId}/itinerary/2030-01-04`), base(6)));
-    await assertSucceeds(setDoc(doc(db(member), `trips/${tripId}/itinerary/2030-01-04`), base(5)));
+
+    await assertFails(setDoc(doc(db(member), `trips/${tripId}/itineraryHistory/client-write`), history));
+    await assertFails(updateDoc(doc(db(leader), historyPath), { outcome: "superseded" }));
+    await assertFails(deleteDoc(doc(db(leader), historyPath)));
+    await assertFails(getDoc(doc(db(outsider), historyPath)));
+    await assertFails(getDocs(collection(db(outsider), `trips/${tripId}/itineraryHistory`)));
+    const stored = await assertSucceeds(getDoc(doc(db(member), historyPath)));
+    assert.equal(stored.get("outcome"), "lost");
+    assert.equal(stored.get("snapshot").backupStops.length, 1);
+    const listed = await assertSucceeds(getDocs(collection(db(deputy), `trips/${tripId}/itineraryHistory`)));
+    assert.equal(listed.size, 1);
   });
 });
 

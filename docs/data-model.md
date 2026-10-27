@@ -36,7 +36,7 @@ Firebase Auth 帳號本身不帶生日，所以未滿 13 歲的人仍可能先�
 ```
 users/{uid}
   birthdate, displayName, photoUrl, createdAt, updatedAt
-  syncAnchors/{deviceId}
+  syncAnchors/{deviceId}   # 選用，客戶端不使用。錨點留在裝置上，時鐘差看 clockProbes
     phoneWallClockAtSync, elapsedRealtimeAtSyncMs, updatedAt
   tripRefs/{tripId}
     tripId, role, tripTitle, updatedAt
@@ -86,7 +86,9 @@ trips/{tripId}
 
 ### syncAnchors/{deviceId}
 
-每次連線（佇列裡的離線寫入送出之後）寫一筆，供離線校正。`deviceId` 符合 `^[A-Za-z0-9_-]{1,64}$`。
+**選用，客戶端目前不使用。** 同步錨點留在裝置上，不寫這條路徑。時鐘差改向 [`clockProbes/{uid}`](#clockprobesuid) 讀：送出前記下 `localMs`，寫入 `{ t: serverTimestamp() }` 再讀回，`offsetMs = t − localMs`。
+
+規則保持不變，所以舊的寫入仍然可以通過。新的客戶端不要讀寫這裡。
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
@@ -94,7 +96,7 @@ trips/{tripId}
 | `elapsedRealtimeAtSyncMs` | int | Android `SystemClock.elapsedRealtime()`，0 到 100 年的毫秒 |
 | `updatedAt` | timestamp | 伺服器時間。寫入後要讀回這個值，不要用送出前猜的時間 |
 
-時鐘差（毫秒）= `updatedAt - phoneWallClockAtSync`。不要另存一個客戶端自填的 offset。
+若仍寫入這份文件，時鐘差（毫秒）= `updatedAt - phoneWallClockAtSync`。不要另存一個客戶端自填的 offset。
 
 ### tripRefs/{tripId}
 
@@ -259,20 +261,29 @@ trips/{tripId}
 | `latitude` / `longitude` | number \| null | 座標。超過 30 天必須改回 null |
 | `coordinatesCachedAt` | timestamp \| null | 座標寫入的時間。兩個座標都是 null 時，這個也是 null |
 
-覆蓋規則：更新時新的 `clientSavedAt` 必須 **大於或等於** 文件上的值。較舊的寫入被拒絕。相等時後送到伺服器的那次留下（重送同一筆因此可以成功）。被蓋過或被拒絕的內容寫入 `itineraryHistory`，客戶端在同一個 batch 裡寫上一版；若自己的寫入被拒，改寫一筆 `outcome = "lost"`。
+客戶端可以寫入任何落在允許範圍內的 `clientSavedAt`，包含比文件上現有值更早的時間。離線的兩個人可能依不同順序送到伺服器，規則不在這裡判輸贏。`backupStops` 上限 30 筆，可以變長或變短。客戶端不要寫 `serverRestored`，那個欄位只給下面的 Cloud Function 用。
+
+修改紀錄不由客戶端寫。ADR 0004 是離線優先；若要求客戶端在同一個 batch 裡帶歷史，會和離線佇列打架。`recordItineraryRevision`（Firestore v2 `onDocumentWrittenWithAuthContext`，`asia-east1`）在行程文件寫入之後處理。一般的 `onDocumentWritten` 拿不到寫入者，所以用帶 auth context 的版本，`recordedBy` 才是 uid。
+
+- 用校正後的 `clientSavedAt` 做最後寫入勝出，比較方式和 `functions/src/clockCorrection.ts` 的 `incomingCorrectedSaveWins` 相同。時間相同時，後送到的那次留下。
+- 新的版本較新：行程文件維持這次寫入，函數把**上一版**寫進 `itineraryHistory`，`outcome = superseded`。
+- 新的版本較舊：函數把這次寫入記成 `outcome = lost`，再把上一版寫回行程文件，並暫時標上 `serverRestored: true`。寫回放在交易裡，會再讀一次當天文件；若內容已經不是這次落敗的版本，就不覆蓋。下一次觸發看到 `serverRestored` 就只把標記刪掉。標記刪掉後內容與還原前相同，不再記歷史，避免迴圈。
+- 第一次建立當天文件沒有上一版，不寫歷史。內容相同的重送也不寫。刪除當天文件（客戶端規則不允許）也不寫。
+- 歷史文件 ID 是這次 Cloud Event 的 id（`/` 換成 `_`）。同一事件重試不會再插一筆。
+- 勝出的那一版整份留下，包含它的 `backupStops`。落敗的那一版（含它自己的 `backupStops`）在修改紀錄裡。
 
 ### itineraryHistory/{historyId}
 
-只能新增，不能改、不能刪（刪帳號時由 Admin SDK 處理）。旅程結束後仍可補寫，避免離線佇列裡的舊版消失。
+只有 Cloud Function 用 Admin SDK 寫入。成員可以讀。客戶端不能建立、更新或刪除。
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
 | `dayId` | string | `YYYY-MM-DD` |
-| `snapshot` | map | 被蓋過或沒被採用的那一版（至少含當時的 `stops`、`backupStops`、`clientSavedAt`、`updatedBy`） |
-| `clientSavedAt` | timestamp | 那一版的校正儲存時間 |
-| `updatedBy` | string | 做出那一版的 uid |
-| `recordedBy` | string | 把紀錄寫進來的 uid，必須是現在的使用者 |
-| `outcome` | `"superseded"` \| `"lost"` | `superseded`：較新的版本已寫上行程，這裡是上一版。`lost`：這次較舊，沒有蓋過行程 |
+| `snapshot` | map | 被蓋過或沒被採用的那一版，鍵是 `stops`、`backupStops`、`clientSavedAt`、`updatedBy` |
+| `clientSavedAt` | timestamp | 等於 snapshot 裡的 `clientSavedAt` |
+| `updatedBy` | string | 等於 snapshot 裡的 `updatedBy` |
+| `recordedBy` | string | 觸發這次寫入的 uid（`authId`）。沒有 auth 時是 `server` |
+| `outcome` | `"superseded"` \| `"lost"` | `superseded`：上一版被較新的校正時間蓋過。`lost`：這次送到的版本比較舊，行程已還原成上一版 |
 | `createdAt` | timestamp | 伺服器時間 |
 
 ## places/{placeId} 與 votes/{uid}
@@ -325,7 +336,7 @@ FirebaseFirestore.instance.settings = const Settings(persistenceEnabled: true);
 
 可以留在手機上的是行程：景點名稱、順序、時間、`place_id`、未滿 30 天的座標，以及同伴最後已知位置。路線線條、交通時間、底圖不進持久化，也不要為了離線去呼叫 Directions 再把結果存下來。離線時把還在期限內的景點連成直線，並顯示「連線後更新路線」。
 
-衝突以**校正後的 `clientSavedAt`** 最新的一筆為準，不看伺服器收到的先後。校正公式與 `functions/src/clockCorrection.ts` 相同（下面的數字就是單元測試的輸入）：
+衝突以**校正後的 `clientSavedAt`** 最新的一筆為準，不看伺服器收到的先後。同步錨點留在裝置上。連線時用 `clockProbes` 取得 `offsetMs`（讀回的 `t` 減去送出時的 `localMs`），並在裝置上記下當時的 `elapsedRealtime`。校正公式與 `functions/src/clockCorrection.ts` 相同（下面的數字就是單元測試的輸入）：
 
 ```
 offsetMs = anchor.updatedAtMs - anchor.phoneWallClockAtSyncMs
@@ -341,7 +352,7 @@ offsetMs = anchor.updatedAtMs - anchor.phoneWallClockAtSyncMs
 - 沒重開機，elapsed 變成 80000：`clientSavedAtMs = 1000000030000`。牆鐘即使亂調也不參與。
 - 重開機後 elapsed 是 1000、牆鐘是 `1000000100000`：`clientSavedAtMs = 999996500000`。
 
-連線順序：先讓 Firestore 把離線佇列送完，再寫新的 `syncAnchors`。佇列裡的 `clientSavedAt` 用的是送出前那次同步的錨點，不因新錨點被改算。離線期間若重開機，才改走牆鐘加最後一次 offset；若那時有人調過手機時間，順序可能失準（ADR 0004 已接受）。
+連線順序：先讓 Firestore 把離線佇列送完，再在裝置上記下新的錨點（`clockProbes` 的 offset 與當時的 `elapsedRealtime`）。不要把錨點寫進 `syncAnchors`。佇列裡的 `clientSavedAt` 用的是送出前那次的裝置錨點，不因新錨點被改算。離線期間若重開機，才改走牆鐘加最後一次 offset；若那時有人調過手機時間，順序可能失準（ADR 0004 已接受）。
 
 成員可以在 5 分鐘的未來上限內填 `clientSavedAt`。這是骨架的信任邊界，#12 可以再收緊。
 
