@@ -77,4 +77,120 @@ void main() {
     expect(optimistic.displayed!.clientSavedAt.isBefore(shown.clientSavedAt), isTrue);
     expect(optimistic.serverRestored, isFalse);
   });
+
+  testWidgets('超過 staleSnapshotHold 沒有較新或 serverRestored 快照就顯示伺服器目前版本', (
+    tester,
+  ) async {
+    final shown = day(name: '較新的行程', savedAt: newer, authorId: 'other');
+    final serverNow = day(
+      name: '伺服器上的舊版',
+      savedAt: older,
+      authorId: 'other',
+      placeId: 'old',
+    );
+    final listener = ItineraryDayListener(
+      state: ItineraryDayViewState(localUserId: me, displayed: shown),
+      now: () => tester.binding.clock.now(),
+    );
+    addTearDown(listener.dispose);
+
+    listener.onSnapshot(ItineraryDaySnapshot(day: serverNow));
+    expect(listener.state.displayed!.spots.single.name, '較新的行程');
+    expect(listener.state.heldSnapshot!.day.spots.single.name, '伺服器上的舊版');
+
+    await tester.pump(
+      ItineraryDayViewState.staleSnapshotHold - const Duration(seconds: 1),
+    );
+    expect(listener.state.displayed!.spots.single.name, '較新的行程');
+
+    await tester.pump(const Duration(seconds: 1));
+    expect(listener.state.displayed!.spots.single.name, '伺服器上的舊版');
+    expect(listener.state.displayed!.clientSavedAt, older);
+    expect(listener.state.serverRestored, isFalse);
+    expect(listener.state.heldSnapshot, isNull);
+  });
+
+  testWidgets('等待期間若又來較舊快照，時間到了顯示較晚那筆伺服器版本', (tester) async {
+    final shown = day(name: '較新的行程', savedAt: newer, authorId: 'other');
+    final listener = ItineraryDayListener(
+      state: ItineraryDayViewState(localUserId: me, displayed: shown),
+      now: () => tester.binding.clock.now(),
+    );
+    addTearDown(listener.dispose);
+
+    listener.onSnapshot(
+      ItineraryDaySnapshot(
+        day: day(name: '第一筆舊版', savedAt: older, authorId: 'other', placeId: 'a'),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 4));
+    listener.onSnapshot(
+      ItineraryDaySnapshot(
+        day: day(
+          name: '伺服器目前版本',
+          savedAt: older.add(const Duration(minutes: 30)),
+          authorId: 'other',
+          placeId: 'b',
+        ),
+      ),
+    );
+    expect(listener.state.displayed!.spots.single.name, '較新的行程');
+    expect(
+      listener.state.heldAt,
+      tester.binding.clock.now().toUtc().subtract(const Duration(seconds: 4)),
+    );
+
+    await tester.pump(
+      ItineraryDayViewState.staleSnapshotHold - const Duration(seconds: 5),
+    );
+    expect(listener.state.displayed!.spots.single.name, '較新的行程');
+
+    await tester.pump(const Duration(seconds: 1));
+    expect(listener.state.displayed!.spots.single.name, '伺服器目前版本');
+    expect(listener.state.heldSnapshot, isNull);
+  });
+
+  testWidgets('10 秒內收到較新版本或 serverRestored 就不再改去舊快照', (tester) async {
+    final shown = day(name: '較新的行程', savedAt: newer, authorId: 'other');
+    final listener = ItineraryDayListener(
+      state: ItineraryDayViewState(localUserId: me, displayed: shown),
+      now: () => tester.binding.clock.now(),
+    );
+    addTearDown(listener.dispose);
+
+    listener.onSnapshot(
+      ItineraryDaySnapshot(
+        day: day(name: '暫時的舊版', savedAt: older, authorId: 'other', placeId: 'old'),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 4));
+    listener.onSnapshot(ItineraryDaySnapshot(day: shown, serverRestored: true));
+    await tester.pump(const Duration(seconds: 20));
+    expect(listener.state.displayed!.spots.single.name, '較新的行程');
+    expect(listener.state.serverRestored, isTrue);
+    expect(listener.state.heldSnapshot, isNull);
+
+    final newerStill = day(
+      name: '更新的行程',
+      savedAt: newer.add(const Duration(hours: 1)),
+      authorId: 'other',
+      placeId: 'next',
+    );
+    final another = ItineraryDayListener(
+      state: ItineraryDayViewState(localUserId: me, displayed: shown),
+      now: () => tester.binding.clock.now(),
+    );
+    addTearDown(another.dispose);
+    another.onSnapshot(
+      ItineraryDaySnapshot(
+        day: day(name: '暫時的舊版', savedAt: older, authorId: 'other', placeId: 'old'),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 3));
+    another.onSnapshot(ItineraryDaySnapshot(day: newerStill));
+    await tester.pump(const Duration(seconds: 20));
+    expect(another.state.displayed!.spots.single.name, '更新的行程');
+    expect(another.state.serverRestored, isFalse);
+    expect(another.state.heldSnapshot, isNull);
+  });
 }
