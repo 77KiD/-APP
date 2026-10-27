@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:group_trip/core/time/time_rules.dart';
 import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/features/trip/data/firestore_paths.dart';
@@ -245,7 +246,7 @@ class FirestoreTripRemote implements TripRemote {
       final inviteSnap = await _invites.doc(normalized).get();
       final data = inviteSnap.data();
       if (!inviteSnap.exists || data == null) {
-        print('Join failed: invite code $normalized not found');
+        debugPrint('Join failed: invite code $normalized not found');
         throw InviteNotFoundException();
       }
       final record = TripCodec.inviteFromMap(
@@ -254,7 +255,7 @@ class FirestoreTripRemote implements TripRemote {
       );
       final now = await serverNow();
       if (TripPolicy.isInviteExpired(record.expiresAt, now)) {
-        print('Join failed: invite code $normalized expired '
+        debugPrint('Join failed: invite code $normalized expired '
             '(expiresAt=${record.expiresAt}, now=$now)');
         throw InviteExpiredException();
       }
@@ -269,7 +270,7 @@ class FirestoreTripRemote implements TripRemote {
             issuerRole: record.issuerRole,
             createdAt: record.createdAt,
           )) {
-            print('Join failed: member invite blocked for code $normalized '
+            debugPrint('Join failed: member invite blocked for code $normalized '
                 '(invitesResetAt=${trip.invitesResetAt}, '
                 'issuerRole=${record.issuerRole.wire}, '
                 'createdAt=${record.createdAt})');
@@ -278,9 +279,9 @@ class FirestoreTripRemote implements TripRemote {
         }
       } on FirebaseException catch (error, stackTrace) {
         // 還沒加入時通常讀不到旅程，交給下面的成員寫入由規則判斷。
-        print('FirebaseException reading trip during join: code=${error.code}, '
+        debugPrint('FirebaseException reading trip during join: code=${error.code}, '
             'message=${error.message}');
-        print('Stack trace: $stackTrace');
+        debugPrint('Stack trace: $stackTrace');
       }
       final memberRef = _trips
           .doc(tripId)
@@ -298,9 +299,9 @@ class FirestoreTripRemote implements TripRemote {
           FirestoreSchema.joinedAt: FieldValue.serverTimestamp(),
         });
       } on FirebaseException catch (error, stackTrace) {
-        print('FirebaseException during member write (join): code=${error.code}, '
+        debugPrint('FirebaseException during member write (join): code=${error.code}, '
             'message=${error.message}');
-        print('Stack trace: $stackTrace');
+        debugPrint('Stack trace: $stackTrace');
         if (error.code == 'permission-denied') throw JoinPermissionDeniedException();
         if (error.code == 'unavailable' || error.code == 'deadline-exceeded') {
           throw JoinNetworkException();
@@ -591,9 +592,9 @@ class FirestoreTripRemote implements TripRemote {
       rethrow;
     } on FirebaseException catch (error, stackTrace) {
       // Log raw error for debugging
-      print('FirebaseException in TripRemote: code=${error.code}, '
+      debugPrint('FirebaseException in TripRemote: code=${error.code}, '
           'message=${error.message}, plugin=${error.plugin}');
-      print('Stack trace: $stackTrace');
+      debugPrint('Stack trace: $stackTrace');
       if (error.code == 'permission-denied') throw TripAccessDenied();
       if (error.code == 'unavailable' || error.code == 'deadline-exceeded') {
         throw TripException('網路連線失敗。請檢查網路連線後再試。');

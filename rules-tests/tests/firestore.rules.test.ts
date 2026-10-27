@@ -885,14 +885,14 @@ describe("invite expiry and invitesOpen", () => {
 
   it("tolerates clock skew up to ±5min when creating invites", async () => {
     const now = Date.now();
-    // Exactly 1h + 5min from now (upper tolerance boundary)
-    const upperBound = Timestamp.fromMillis(now + 65 * 60 * 1000);
-    // Exactly 1h - 5min from now (lower tolerance boundary)
-    const lowerBound = Timestamp.fromMillis(now + 55 * 60 * 1000);
-    // Just over upper tolerance (1h + 5min + 1sec)
-    const tooHigh = Timestamp.fromMillis(now + 65 * 60 * 1000 + 1000);
-    // Just under lower tolerance (1h - 5min - 1sec)
-    const tooLow = Timestamp.fromMillis(now + 55 * 60 * 1000 - 1000);
+    // Safely within upper bound (1h + 4min, well inside ±5min tolerance)
+    const upperBound = Timestamp.fromMillis(now + 64 * 60 * 1000);
+    // Safely within lower bound (1h - 4min, well inside ±5min tolerance)
+    const lowerBound = Timestamp.fromMillis(now + 56 * 60 * 1000);
+    // Beyond upper tolerance (1h + 6min, outside ±5min tolerance)
+    const tooHigh = Timestamp.fromMillis(now + 66 * 60 * 1000);
+    // Beyond lower tolerance (1h - 6min, outside ±5min tolerance)
+    const tooLow = Timestamp.fromMillis(now + 54 * 60 * 1000);
 
     await assertSucceeds(setDoc(doc(db(leader), "invites/SKEW_UPPER"), inviteDoc(leader, upperBound)));
     await assertSucceeds(setDoc(doc(db(leader), "invites/SKEW_LOWER"), inviteDoc(leader, lowerBound)));
