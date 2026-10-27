@@ -134,7 +134,7 @@ trips/{tripId}
 | `createdBy` | string | 建立者 uid。`invitesOpen` 為 true 時可以是任何成員；關掉之後只能是隊長或副隊長 |
 | `creatorRole` | `"leader"` \| `"deputy"` \| `"member"` | 建立當下該成員文件上的 `role`。規則核對，不能改成別的角色，之後也不能改。加入時看這個快照，不看建立者後來的角色 |
 | `active` | bool | 建立時必須 true。隊長或副隊長可改成 false（撤銷）。不能改回 true，也不能改其他欄位 |
-| `expiresAt` | timestamp | 必填，不能是 null。建立時必須落在 `request.time + 1 小時` 往前 5 分鐘到 `request.time + 1 小時`（含）之間，用來吸收客戶端對時誤差，同時禁止把效期拉過 1 小時 |
+| `expiresAt` | timestamp | 必填，不能是 null。建立時必須落在 `request.time + 1 小時` 的前後 5 分鐘（含）之間，用來吸收客戶端對時誤差，以及略早於這次寫入的 clock probe。加入時仍以 `createdAt + 1 小時` 為上限，所以寫得比較晚的 `expiresAt` 不會把可加入時間拉過 1 小時 |
 | `createdAt` | timestamp | 必須等於這次寫入的 `request.time` |
 
 加入時這些條件都要成立：
@@ -183,14 +183,14 @@ trips/{tripId}
 - 隊長或副隊長整團結束：`status = ended`、`endReason = leader_manual`、`endedAt` 為伺服器時間。一般成員按結束是個人結束（#14），這份規則不提供整團 `ended`。
 - 結束後客戶端不能再改旅程本體。行程與景點仍可讀，位置不可讀。
 
-建立順序：
+建立順序（客戶端先 `get` 再 `set`。文件不存在時，這個 `get` 必須成功且 `exists` 為 false，否則 `set` 不會執行）：
 
 1. 寫 `users/{uid}`（已滿 13 歲）。
-2. 寫 `trips/{tripId}`（`leaderId` 是自己，`invitesOpen` 為 true，`invitesResetAt` 為 null）。此時建立者已能 `get` 旅程，因為 `leaderId` 相符。
-3. 寫 `members/{uid}`，`role = leader`，`inviteCode = null`，`isMinor` 依生日。
+2. 已註冊使用者可以 `get` 尚未建立的 `trips/{tripId}`。隨機 id 只會得到不存在，讀不到別人已經建立的旅程。接著寫 `trips/{tripId}`（`leaderId` 是自己，`invitesOpen` 為 true，`invitesResetAt` 為 null）。建立之後，建立者能 `get`，因為 `leaderId` 相符。
+3. 當事人可以 `get` 自己尚未建立的 `trips/{tripId}/members/{uid}`。不能讀別人尚未建立的成員文件，也不能 `list`。接著寫這份文件，`role = leader`，`inviteCode = null`，`isMinor` 依生日。加入的人也走同一段存在檢查，所以規則開放的是「自己的、尚未建立的成員文件」，不限隊長。
 4. 寫 `invites/{code}` 與 `users/{uid}/tripRefs/{tripId}`。
 
-子集合的讀寫要求成員文件已存在，不能只靠 `leaderId`。
+其他子集合的讀寫要求成員文件已存在，不能只靠 `leaderId`。上面第 3 步是唯一例外。
 
 ## members/{uid}
 
