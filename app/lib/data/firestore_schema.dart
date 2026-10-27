@@ -8,6 +8,8 @@ abstract final class FirestoreSchema {
   static const inviteCodeMaxLength = 12;
 
   static const users = 'users';
+
+  /// 資料模型裡的選用集合。客戶端不寫；連線後的時鐘差只留在手機上。
   static const syncAnchors = 'syncAnchors';
   static const tripRefs = 'tripRefs';
 
@@ -139,6 +141,9 @@ abstract final class FirestoreSchema {
   static const backupStops = 'backupStops';
   static const clientSavedAt = 'clientSavedAt';
   static const updatedBy = 'updatedBy';
+
+  /// Cloud Function 把較新的行程寫回時設為 true。客戶端只讀、不寫。
+  static const serverRestored = 'serverRestored';
   static const placeId = 'place_id';
   static const name = 'name';
   static const order = 'order';
@@ -210,6 +215,9 @@ abstract final class LocalOnlyFields {
   static const passwordHash = 'passwordHash';
   static const queue = 'queue';
   static const timeSample = 'timeSample';
+
+  /// 本機才有。true 代表這次行程寫入要覆寫備選清單；缺省或 false 則不動伺服器上的清單。
+  static const replaceBackupStops = 'replaceBackupStops';
   static const acked = 'acked';
   static const serverNow = 'serverNow';
   static const deviceNow = 'deviceNow';

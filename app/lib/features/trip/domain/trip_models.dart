@@ -257,16 +257,33 @@ class ItineraryDay {
     required this.spots,
     required this.updatedAt,
     required this.authorId,
+    this.backupStops,
+    this.replaceBackupStops = false,
   });
 
   final String tripId;
   final String date;
   final List<ItinerarySpot> spots;
+
+  /// 備選清單。null 表示這份資料沒有帶清單。
+  /// 更新時是否寫進 Firestore 看 [replaceBackupStops]，不是看這份清單是不是空的。
+  final List<ItinerarySpot>? backupStops;
+
+  /// true 才在更新時覆寫備選清單（包含明確清空）。修改行程內容時維持 false。
+  final bool replaceBackupStops;
+
   final DateTime updatedAt;
+
+  /// 校正後的儲存時間。對應 Firestore `clientSavedAt`，不是伺服器收到的 `updatedAt`。
+  DateTime get clientSavedAt => updatedAt;
+
   final String authorId;
 
   ItineraryDay copy({
     List<ItinerarySpot>? spots,
+    List<ItinerarySpot>? backupStops,
+    bool setBackupStops = false,
+    bool? replaceBackupStops,
     DateTime? updatedAt,
     String? authorId,
   }) {
@@ -274,6 +291,8 @@ class ItineraryDay {
       tripId: tripId,
       date: date,
       spots: spots ?? this.spots,
+      backupStops: setBackupStops ? backupStops : this.backupStops,
+      replaceBackupStops: replaceBackupStops ?? this.replaceBackupStops,
       updatedAt: updatedAt ?? this.updatedAt,
       authorId: authorId ?? this.authorId,
     );

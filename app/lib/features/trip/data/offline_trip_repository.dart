@@ -553,7 +553,9 @@ class OfflineTripRepository implements TripRepository {
     final day = await local.readItineraryDay(tripId, date);
     if (day == null) return null;
     final purged = ItineraryCachePolicy.purgeDay(day, now);
-    if (TripCodec.spotsKey(day.spots) != TripCodec.spotsKey(purged.spots)) {
+    if (TripCodec.spotsKey(day.spots) != TripCodec.spotsKey(purged.spots) ||
+        TripCodec.spotsKey(day.backupStops ?? const []) !=
+            TripCodec.spotsKey(purged.backupStops ?? const [])) {
       await local.saveItineraryDay(purged);
     }
     return purged;
@@ -603,7 +605,6 @@ class OfflineTripRepository implements TripRepository {
   @override
   Future<void> sync() async {
     if (!connectivity.isOnline) return;
-    await _recordTimeSample();
     final queue = await local.readQueue();
     for (final op in queue) {
       // 行程改由 _mergeItinerary 比較校正後的儲存時間，避免先蓋掉另一台手機的版本。
@@ -615,6 +616,10 @@ class OfflineTripRepository implements TripRepository {
     for (final op in await local.readQueue()) {
       if (op.type == SyncOpType.upsertItinerary) await local.removeOp(op);
     }
+    // 佇列裡的 clientSavedAt 沿用送出前的樣本。新的時鐘差等離線寫入送完才記下，
+    // 而且只留在手機上，不寫 syncAnchors。
+    await remote.flushPendingWrites();
+    await _recordTimeSample();
   }
 
   Future<void> _trySync() async {
@@ -828,6 +833,12 @@ class OfflineTripRepository implements TripRepository {
           await _keepLoser(remoteDay);
         }
         await remote.upsertItineraryDay(cached);
+        try {
+          final saved = await remote.fetchItineraryDay(tripId, date);
+          if (saved != null) await local.saveItineraryDay(saved);
+        } on TripException {
+          // 遠端已保留備選清單。本機等下次讀得到再補。
+        }
       } else if (TripCodec.spotsKey(remoteDay.spots) !=
           TripCodec.spotsKey(cached.spots)) {
         await _keepLoser(cached);

@@ -1,4 +1,5 @@
 import 'package:group_trip/core/time/time_rules.dart';
+import 'package:group_trip/features/trip/domain/itinerary_day_write.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/features/trip/domain/trip_policy.dart';
 import 'package:group_trip/features/trip/domain/trip_repository.dart';
@@ -37,6 +38,9 @@ class MemoryTripRemote implements TripRemote {
     final device = (await deviceNow()).toUtc();
     return ServerClockReading(serverNow: database.clock.toUtc(), deviceNow: device);
   }
+
+  @override
+  Future<void> flushPendingWrites() async {}
 
   @override
   Future<void> upsertTrip(Trip trip) async {
@@ -161,7 +165,10 @@ class MemoryTripRemote implements TripRemote {
   @override
   Future<void> upsertItineraryDay(ItineraryDay day) async {
     final days = database.itinerary.putIfAbsent(day.tripId, () => {});
-    days[day.date] = day;
+    days[day.date] = ItineraryDayWrite.merge(
+      existing: days[day.date],
+      incoming: day,
+    );
   }
 
   @override
