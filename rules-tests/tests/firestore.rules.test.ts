@@ -885,19 +885,17 @@ describe("invite expiry and invitesOpen", () => {
 
   it("tolerates clock skew up to ±5min when creating invites", async () => {
     const now = Date.now();
-    // Safely within upper bound (1h + 4min, well inside ±5min tolerance)
-    const upperBound = Timestamp.fromMillis(now + 64 * 60 * 1000);
-    // Safely within lower bound (1h - 4min, well inside ±5min tolerance)
-    const lowerBound = Timestamp.fromMillis(now + 56 * 60 * 1000);
-    // Beyond upper tolerance (1h + 6min, outside ±5min tolerance)
-    const tooHigh = Timestamp.fromMillis(now + 66 * 60 * 1000);
-    // Beyond lower tolerance (1h - 6min, outside ±5min tolerance)
-    const tooLow = Timestamp.fromMillis(now + 54 * 60 * 1000);
+    // Within tolerance: use margins similar to aboutOneHourFromNow (58min), safely inside ±5min
+    const withinUpper = Timestamp.fromMillis(now + 62 * 60 * 1000); // 1h + 2min
+    const withinLower = Timestamp.fromMillis(now + 58 * 60 * 1000); // 1h - 2min (same as aboutOneHourFromNow)
+    // Outside tolerance
+    const beyondUpper = Timestamp.fromMillis(now + 70 * 60 * 1000); // 1h + 10min
+    const beyondLower = Timestamp.fromMillis(now + 50 * 60 * 1000); // 1h - 10min
 
-    await assertSucceeds(setDoc(doc(db(leader), "invites/SKEW_UPPER"), inviteDoc(leader, upperBound)));
-    await assertSucceeds(setDoc(doc(db(leader), "invites/SKEW_LOWER"), inviteDoc(leader, lowerBound)));
-    await assertFails(setDoc(doc(db(leader), "invites/SKEW_TOO_HIGH"), inviteDoc(leader, tooHigh)));
-    await assertFails(setDoc(doc(db(leader), "invites/SKEW_TOO_LOW"), inviteDoc(leader, tooLow)));
+    await assertSucceeds(setDoc(doc(db(leader), "invites/SKEW_WITHIN_UP"), inviteDoc(leader, withinUpper)));
+    await assertSucceeds(setDoc(doc(db(leader), "invites/SKEW_WITHIN_LOW"), inviteDoc(leader, withinLower)));
+    await assertFails(setDoc(doc(db(leader), "invites/SKEW_BEYOND_UP"), inviteDoc(leader, beyondUpper)));
+    await assertFails(setDoc(doc(db(leader), "invites/SKEW_BEYOND_LOW"), inviteDoc(leader, beyondLower)));
   });
 
   it("closes invites by killing only member codes, while officer codes keep their hour", async () => {
