@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:group_trip/app/app_scope.dart';
+import 'package:group_trip/core/widgets/datetime_input.dart';
 import 'package:group_trip/core/widgets/form_widgets.dart';
 import 'package:group_trip/l10n/app_strings.dart';
 
@@ -173,12 +174,13 @@ class _SignUpPageState extends State<SignUpPage> {
             controller: _name,
             autofillHints: const [AutofillHints.name],
           ),
-          LabeledField(
+          DateTimeInputField(
             label: AppStrings.birthday,
             controller: _birthday,
             hint: AppStrings.dateHint,
             helper: AppStrings.dateHelper,
-            keyboardType: TextInputType.datetime,
+            isDate: true,
+            validator: const DateValidator(required: true, notInFuture: true).call,
           ),
           CheckboxListTile(
             contentPadding: EdgeInsets.zero,

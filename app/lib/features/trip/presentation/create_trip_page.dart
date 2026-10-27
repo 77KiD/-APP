@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:group_trip/app/app_scope.dart';
+import 'package:group_trip/core/widgets/datetime_input.dart';
 import 'package:group_trip/core/widgets/form_widgets.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/features/trip/domain/trip_policy.dart';
@@ -79,19 +80,28 @@ class _CreateTripPageState extends State<CreateTripPage> {
         children: [
           const PageHeading(AppStrings.createTrip),
           LabeledField(label: AppStrings.tripTitle, controller: _title),
-          LabeledField(
+          DateTimeInputField(
             label: AppStrings.startDate,
             controller: _start,
             hint: AppStrings.dateHint,
             helper: AppStrings.dateHelper,
-            keyboardType: TextInputType.datetime,
+            isDate: true,
+            validator: (value) => DateValidator(
+              required: true,
+              maxDaysAfter: (_end.text.isNotEmpty ? (_end.text, 30) : null),
+            ).call(value),
           ),
-          LabeledField(
+          DateTimeInputField(
             label: AppStrings.endDate,
             controller: _end,
             hint: AppStrings.dateHint,
             helper: AppStrings.dateHelper,
-            keyboardType: TextInputType.datetime,
+            isDate: true,
+            validator: (value) => DateValidator(
+              required: true,
+              minDate: _start.text.isNotEmpty ? _start.text : null,
+              maxDaysAfter: (_start.text.isNotEmpty ? (_start.text, 30) : null),
+            ).call(value),
           ),
           LabeledField(
             label: AppStrings.timeZone,
@@ -102,19 +112,19 @@ class _CreateTripPageState extends State<CreateTripPage> {
             AppStrings.expectedReturnOptional,
             style: Theme.of(context).textTheme.bodyLarge,
           ),
-          LabeledField(
+          DateTimeInputField(
             label: AppStrings.returnDate,
             controller: _returnDate,
             hint: AppStrings.dateHint,
             helper: AppStrings.dateHelper,
-            keyboardType: TextInputType.datetime,
+            isDate: true,
           ),
-          LabeledField(
+          DateTimeInputField(
             label: AppStrings.returnTime,
             controller: _returnTime,
             hint: AppStrings.timeHint,
             helper: AppStrings.timeHelper,
-            keyboardType: TextInputType.datetime,
+            isDate: false,
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _submit(),
           ),
