@@ -136,6 +136,8 @@ abstract final class AppStrings {
   static const joinNeedsNetwork = '加入旅程需要網路。邀請碼核對通過後，旅程會存到這台手機。';
   static const offlineMissing = '目前沒有網路，這趟旅程還沒有存在這台手機上';
   static const genericError = '發生問題，請再試一次';
+  static const joinPermissionDenied = '無法加入這個旅程。可能是邀請碼已失效、權限不足，或網路問題。請向隊長索取新的邀請碼。';
+  static const joinNetworkError = '網路連線失敗。請檢查網路連線後再試。';
 
   static const disclosureTitle = '定位權限說明';
   static const disclosureBody =

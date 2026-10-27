@@ -238,11 +238,13 @@ service cloud.firestore {
         );
     }
 
-    // Client writes expiresAt; rules pin it to request.time + 1h.
-    // The 5 minute floor absorbs clock skew. Nothing later than request.time + 1h is accepted.
+    // Client writes expiresAt; rules pin it to request.time + 1h with ±5min tolerance.
+    // This absorbs clock skew when the client uses readServerClock() + 1h but the
+    // phone clock is slightly fast. The actual expiry is still checked server-side
+    // at join time using request.time, so this tolerance doesn't extend code lifetime.
     function expiresOneServerHourFromNow(expiresAt) {
       return expiresAt is timestamp
-        && expiresAt <= request.time + duration.value(1, 'h')
+        && expiresAt <= request.time + duration.value(1, 'h') + duration.value(5, 'm')
         && expiresAt >= request.time + duration.value(1, 'h') - duration.value(5, 'm');
     }
 

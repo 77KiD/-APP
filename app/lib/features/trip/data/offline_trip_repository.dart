@@ -89,7 +89,11 @@ class OfflineTripRepository implements TripRepository {
         entityId: trip.inviteCode,
       ),
     );
-    await _trySync();
+    // Critical: trip/member/invite must reach the server. Don't swallow errors.
+    if (!connectivity.isOnline) {
+      throw ValidationException('建立旅程需要網路。請確認已連線後再試。');
+    }
+    await sync();
     return (await local.readTrip(trip.id)) ?? trip;
   }
 
@@ -479,7 +483,11 @@ class OfflineTripRepository implements TripRepository {
         entityId: invite.code,
       ),
     );
-    await _trySync();
+    // Critical: invite must reach the server. Don't swallow errors.
+    if (!connectivity.isOnline) {
+      throw ValidationException('產生邀請碼需要網路。請確認已連線後再試。');
+    }
+    await sync();
     return (await local.readInvite(invite.code)) ?? invite;
   }
 

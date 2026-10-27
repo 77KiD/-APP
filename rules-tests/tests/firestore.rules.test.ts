@@ -883,6 +883,23 @@ describe("invite expiry and invitesOpen", () => {
     await assertFails(join("long-guest", "STRETCH01"));
   });
 
+  it("tolerates clock skew up to ±5min when creating invites", async () => {
+    const now = Date.now();
+    // Exactly 1h + 5min from now (upper tolerance boundary)
+    const upperBound = Timestamp.fromMillis(now + 65 * 60 * 1000);
+    // Exactly 1h - 5min from now (lower tolerance boundary)
+    const lowerBound = Timestamp.fromMillis(now + 55 * 60 * 1000);
+    // Just over upper tolerance (1h + 5min + 1sec)
+    const tooHigh = Timestamp.fromMillis(now + 65 * 60 * 1000 + 1000);
+    // Just under lower tolerance (1h - 5min - 1sec)
+    const tooLow = Timestamp.fromMillis(now + 55 * 60 * 1000 - 1000);
+
+    await assertSucceeds(setDoc(doc(db(leader), "invites/SKEW_UPPER"), inviteDoc(leader, upperBound)));
+    await assertSucceeds(setDoc(doc(db(leader), "invites/SKEW_LOWER"), inviteDoc(leader, lowerBound)));
+    await assertFails(setDoc(doc(db(leader), "invites/SKEW_TOO_HIGH"), inviteDoc(leader, tooHigh)));
+    await assertFails(setDoc(doc(db(leader), "invites/SKEW_TOO_LOW"), inviteDoc(leader, tooLow)));
+  });
+
   it("closes invites by killing only member codes, while officer codes keep their hour", async () => {
     await assertSucceeds(setDoc(doc(db(member), "invites/MEMBERCD1"), inviteDoc(member)));
     await assertSucceeds(setDoc(doc(db(leader), "invites/LEADERCD1"), inviteDoc(leader)));

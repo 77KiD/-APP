@@ -454,6 +454,14 @@ class InviteClosedException extends TripException {
   InviteClosedException() : super(AppStrings.inviteClosedByPublicInvite);
 }
 
+class JoinPermissionDeniedException extends TripException {
+  JoinPermissionDeniedException() : super(AppStrings.joinPermissionDenied);
+}
+
+class JoinNetworkException extends TripException {
+  JoinNetworkException() : super(AppStrings.joinNetworkError);
+}
+
 class AlreadyMemberException extends TripException {
   AlreadyMemberException() : super(AppStrings.alreadyMember);
 }
