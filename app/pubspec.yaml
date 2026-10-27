@@ -29,3 +29,15 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/fonts/
+  fonts:
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/Nunito-Variable.ttf
+    - family: DMSans
+      fonts:
+        - asset: assets/fonts/DMSans-Variable.ttf
+    - family: NotoSansTC
+      fonts:
+        - asset: assets/fonts/NotoSansTC-Variable.ttf

@@ -22,6 +22,7 @@ class TravelApp extends StatelessWidget {
         title: AppStrings.appTitle,
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
         locale: const Locale('zh', 'TW'),
         supportedLocales: const [Locale('zh', 'TW')],
         localizationsDelegates: const [
