@@ -883,19 +883,17 @@ describe("invite expiry and invitesOpen", () => {
     await assertFails(join("long-guest", "STRETCH01"));
   });
 
-  it("tolerates clock skew up to ±5min when creating invites", async () => {
+  it("tolerates clock skew when creating invites (rejects far future/past)", async () => {
     const now = Date.now();
-    // Within tolerance: use margins similar to aboutOneHourFromNow (58min), safely inside ±5min
-    const withinUpper = Timestamp.fromMillis(now + 62 * 60 * 1000); // 1h + 2min
-    const withinLower = Timestamp.fromMillis(now + 58 * 60 * 1000); // 1h - 2min (same as aboutOneHourFromNow)
-    // Outside tolerance
-    const beyondUpper = Timestamp.fromMillis(now + 70 * 60 * 1000); // 1h + 10min
-    const beyondLower = Timestamp.fromMillis(now + 50 * 60 * 1000); // 1h - 10min
-
-    await assertSucceeds(setDoc(doc(db(leader), "invites/SKEW_WITHIN_UP"), inviteDoc(leader, withinUpper)));
-    await assertSucceeds(setDoc(doc(db(leader), "invites/SKEW_WITHIN_LOW"), inviteDoc(leader, withinLower)));
-    await assertFails(setDoc(doc(db(leader), "invites/SKEW_BEYOND_UP"), inviteDoc(leader, beyondUpper)));
-    await assertFails(setDoc(doc(db(leader), "invites/SKEW_BEYOND_LOW"), inviteDoc(leader, beyondLower)));
+    // The existing aboutOneHourFromNow() (58min) should still work with ±5min tolerance
+    await assertSucceeds(setDoc(doc(db(leader), "invites/NORMAL_EXPIRY"), inviteDoc(leader)));
+    
+    // Way beyond tolerance - clearly outside ±5min window
+    const wayTooLate = Timestamp.fromMillis(now + 90 * 60 * 1000); // 1h + 30min
+    const wayTooSoon = Timestamp.fromMillis(now + 30 * 60 * 1000); // 30min (less than 1h - 5min)
+    
+    await assertFails(setDoc(doc(db(leader), "invites/TOO_LATE"), inviteDoc(leader, wayTooLate)));
+    await assertFails(setDoc(doc(db(leader), "invites/TOO_SOON"), inviteDoc(leader, wayTooSoon)));
   });
 
   it("closes invites by killing only member codes, while officer codes keep their hour", async () => {

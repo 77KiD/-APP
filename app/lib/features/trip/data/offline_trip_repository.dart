@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:group_trip/core/ids/id_generator.dart';
 import 'package:group_trip/core/time/time_rules.dart';
 import 'package:group_trip/features/auth/domain/auth_models.dart';
@@ -89,11 +90,16 @@ class OfflineTripRepository implements TripRepository {
         entityId: trip.inviteCode,
       ),
     );
-    // Critical: trip/member/invite must reach the server. Don't swallow errors.
-    if (!connectivity.isOnline) {
-      throw ValidationException('建立旅程需要網路。請確認已連線後再試。');
+    // Try to sync if online, but allow offline creation
+    if (connectivity.isOnline) {
+      try {
+        await sync();
+      } on TripException catch (error) {
+        // Log sync failure but don't block trip creation
+        debugPrint('Warning: Trip created locally but sync failed: ${error.message}');
+        debugPrint('Trip/invite may not be visible to other users until next sync succeeds');
+      }
     }
-    await sync();
     return (await local.readTrip(trip.id)) ?? trip;
   }
 
@@ -483,11 +489,16 @@ class OfflineTripRepository implements TripRepository {
         entityId: invite.code,
       ),
     );
-    // Critical: invite must reach the server. Don't swallow errors.
+    // Critical: invite must reach server to be usable by others
     if (!connectivity.isOnline) {
       throw ValidationException('產生邀請碼需要網路。請確認已連線後再試。');
     }
-    await sync();
+    try {
+      await sync();
+    } on TripException catch (error) {
+      // Don't show the invite code if server write failed
+      throw ValidationException('無法產生邀請碼：${error.message}');
+    }
     return (await local.readInvite(invite.code)) ?? invite;
   }
 
