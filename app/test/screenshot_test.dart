@@ -10,20 +10,53 @@ void main() {
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     
-    final fontLoader = FontLoader('Nunito')
+    // Load Nunito (headings)
+    final nunitoLoader = FontLoader('Nunito')
       ..addFont(rootBundle.load('assets/fonts/Nunito-Bold.ttf'));
-    await fontLoader.load();
+    await nunitoLoader.load();
     
+    // Load DM Sans (body text)
     final dmSansLoader = FontLoader('DMSans')
       ..addFont(rootBundle.load('assets/fonts/DMSans-Regular.ttf'))
       ..addFont(rootBundle.load('assets/fonts/DMSans-SemiBold.ttf'))
       ..addFont(rootBundle.load('assets/fonts/DMSans-Bold.ttf'));
     await dmSansLoader.load();
     
-    final notoLoader = FontLoader('NotoSansTC')
+    // Load Noto Sans TC (CJK fallback) - register with exact family name
+    final notoTCLoader = FontLoader('NotoSansTC')
       ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Regular.ttf'))
       ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Bold.ttf'));
-    await notoLoader.load();
+    await notoTCLoader.load();
+    
+    // Also register as fallback families for Nunito and DMSans
+    final notoFallbackNunito = FontLoader('Nunito')
+      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Regular.ttf'))
+      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Bold.ttf'));
+    await notoFallbackNunito.load();
+    
+    final notoFallbackDMSans = FontLoader('DMSans')
+      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Regular.ttf'))
+      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Bold.ttf'));
+    await notoFallbackDMSans.load();
+    
+    // Load MaterialIcons from Flutter SDK
+    final materialIconsPath = '${Directory.current.path}/../flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf';
+    final materialIconsFile = File(materialIconsPath);
+    
+    if (await materialIconsFile.exists()) {
+      final materialIconsLoader = FontLoader('MaterialIcons')
+        ..addFont(Future.value(await materialIconsFile.readAsBytes()).then((bytes) => ByteData.view(Uint8List.fromList(bytes).buffer)));
+      await materialIconsLoader.load();
+    } else {
+      // Try alternative path (in tmp where we installed Flutter)
+      final altPath = '/tmp/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf';
+      final altFile = File(altPath);
+      if (await altFile.exists()) {
+        final materialIconsLoader = FontLoader('MaterialIcons')
+          ..addFont(Future.value(await altFile.readAsBytes()).then((bytes) => ByteData.view(Uint8List.fromList(bytes).buffer)));
+        await materialIconsLoader.load();
+      }
+    }
   });
 
   testWidgets('Screenshot: Light theme 100%', (WidgetTester tester) async {
@@ -31,6 +64,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         home: const AppShell(
           currentTrip: '東京自由行 2026',
@@ -51,6 +85,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         home: MediaQuery(
           data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
@@ -74,6 +109,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.dark(),
         home: const AppShell(
           currentTrip: '東京自由行 2026',
@@ -94,6 +130,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.dark(),
         home: MediaQuery(
           data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
