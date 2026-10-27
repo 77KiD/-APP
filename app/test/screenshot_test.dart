@@ -10,33 +10,29 @@ void main() {
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     
-    // Load Nunito (headings)
+    // Load Nunito (headings) - variable font
     final nunitoLoader = FontLoader('Nunito')
-      ..addFont(rootBundle.load('assets/fonts/Nunito-Bold.ttf'));
+      ..addFont(rootBundle.load('assets/fonts/Nunito-Variable.ttf'));
     await nunitoLoader.load();
     
-    // Load DM Sans (body text)
+    // Load DM Sans (body text) - variable font
     final dmSansLoader = FontLoader('DMSans')
-      ..addFont(rootBundle.load('assets/fonts/DMSans-Regular.ttf'))
-      ..addFont(rootBundle.load('assets/fonts/DMSans-SemiBold.ttf'))
-      ..addFont(rootBundle.load('assets/fonts/DMSans-Bold.ttf'));
+      ..addFont(rootBundle.load('assets/fonts/DMSans-Variable.ttf'));
     await dmSansLoader.load();
     
-    // Load Noto Sans TC (CJK fallback) - register with exact family name
+    // Load Noto Sans TC (CJK fallback) - variable font with full Chinese support
     final notoTCLoader = FontLoader('NotoSansTC')
-      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Regular.ttf'))
-      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Bold.ttf'));
+      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Variable.ttf'));
     await notoTCLoader.load();
     
-    // Also register as fallback families for Nunito and DMSans
+    // Also register Noto Sans TC as fallback for Nunito and DMSans
+    // This ensures Chinese text renders even when primary fonts don't have the glyphs
     final notoFallbackNunito = FontLoader('Nunito')
-      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Regular.ttf'))
-      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Bold.ttf'));
+      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Variable.ttf'));
     await notoFallbackNunito.load();
     
     final notoFallbackDMSans = FontLoader('DMSans')
-      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Regular.ttf'))
-      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Bold.ttf'));
+      ..addFont(rootBundle.load('assets/fonts/NotoSansTC-Variable.ttf'));
     await notoFallbackDMSans.load();
     
     // Load MaterialIcons from Flutter SDK

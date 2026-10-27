@@ -34,19 +34,10 @@ flutter:
   fonts:
     - family: Nunito
       fonts:
-        - asset: assets/fonts/Nunito-Bold.ttf
-          weight: 700
+        - asset: assets/fonts/Nunito-Variable.ttf
     - family: DMSans
       fonts:
-        - asset: assets/fonts/DMSans-Regular.ttf
-          weight: 400
-        - asset: assets/fonts/DMSans-SemiBold.ttf
-          weight: 600
-        - asset: assets/fonts/DMSans-Bold.ttf
-          weight: 700
+        - asset: assets/fonts/DMSans-Variable.ttf
     - family: NotoSansTC
       fonts:
-        - asset: assets/fonts/NotoSansTC-Regular.ttf
-          weight: 400
-        - asset: assets/fonts/NotoSansTC-Bold.ttf
-          weight: 700
+        - asset: assets/fonts/NotoSansTC-Variable.ttf
