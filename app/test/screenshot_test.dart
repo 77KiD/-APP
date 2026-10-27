@@ -6,45 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:group_trip/core/theme/app_theme.dart';
 import 'package:group_trip/core/widgets/app_shell.dart';
 
-/// Custom golden file comparator that allows small pixel differences due to
-/// font rendering variations across environments. Allows up to 0.5% difference.
-class TolerantGoldenFileComparator extends LocalFileComparator {
-  TolerantGoldenFileComparator(super.testFile, {this.maxAllowedDiff = 0.005});
-
-  final double maxAllowedDiff;
-
-  @override
-  Future<bool> compare(Uint8List imageBytes, Uri golden) async {
-    final result = await GoldenFileComparator.compareLists(
-      imageBytes,
-      await getGoldenBytes(golden),
-    );
-
-    if (!result.passed && result.diffPercent <= maxAllowedDiff) {
-      debugPrint(
-        'Golden diff ${result.diffPercent.toStringAsFixed(4)} '
-        'is within tolerance $maxAllowedDiff for $golden',
-      );
-      return true;
-    }
-
-    if (!result.passed) {
-      final error = await generateFailureOutput(result, golden, basedir);
-      throw FlutterError(error);
-    }
-    return result.passed;
-  }
-}
-
 void main() {
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
-    
-    // Use tolerant comparator for font rendering differences
-    goldenFileComparator = TolerantGoldenFileComparator(
-      Uri.parse('test/screenshot_test.dart'),
-      maxAllowedDiff: 0.005, // 0.5% tolerance for font rendering variations
-    );
     
     // Load Nunito (headings) - variable font
     final nunitoLoader = FontLoader('Nunito')
