@@ -24,7 +24,7 @@ jobs:
       - run: flutter test
 
   regenerate-goldens:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/cursor/'))
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'cursor/'))
     runs-on: ubuntu-latest
     defaults:
       run:
