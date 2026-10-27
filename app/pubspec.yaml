@@ -19,9 +19,7 @@ dependencies:
   firebase_core: ^5.1.0
   firebase_crashlytics: ^6.0.1
   flutter_timezone: ^5.1.1
-  google_fonts: ^7.1.0
   path_provider: ^2.1.6
-  shared_preferences: ^2.3.5
   timezone: ^0.11.2
 
 dev_dependencies:
@@ -31,3 +29,24 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/fonts/
+  fonts:
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/Nunito-Bold.ttf
+          weight: 700
+    - family: DMSans
+      fonts:
+        - asset: assets/fonts/DMSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/DMSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/DMSans-Bold.ttf
+          weight: 700
+    - family: NotoSansTC
+      fonts:
+        - asset: assets/fonts/NotoSansTC-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSansTC-Bold.ttf
+          weight: 700

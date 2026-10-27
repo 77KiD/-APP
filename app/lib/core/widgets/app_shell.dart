@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:group_trip/core/theme/semantic_colors.dart';
-import 'package:group_trip/core/theme/theme_mode_settings.dart';
+import 'package:group_trip/core/theme/spacing.dart';
 
 enum BottomNavTab {
   itinerary,

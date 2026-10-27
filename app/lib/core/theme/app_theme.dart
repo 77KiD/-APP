@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:group_trip/core/theme/app_colors.dart';
 import 'package:group_trip/core/theme/semantic_colors.dart';
-import 'package:group_trip/core/theme/theme_mode_settings.dart';
+import 'package:group_trip/core/theme/spacing.dart';
 
 abstract final class AppTheme {
   static ThemeData light() {
@@ -26,11 +25,15 @@ abstract final class AppTheme {
     required SemanticColors semanticColors,
     required Color scaffoldBg,
   }) {
-    final headingFont = GoogleFonts.nunito(
+    const headingFont = TextStyle(
+      fontFamily: 'Nunito',
+      fontFamilyFallback: ['NotoSansTC'],
       fontWeight: FontWeight.w700,
       height: 1.5,
     );
-    final bodyFont = GoogleFonts.dmSans(
+    const bodyFont = TextStyle(
+      fontFamily: 'DMSans',
+      fontFamilyFallback: ['NotoSansTC'],
       fontWeight: FontWeight.w400,
       height: 1.5,
     );
