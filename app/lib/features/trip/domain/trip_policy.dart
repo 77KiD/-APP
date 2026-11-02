@@ -80,7 +80,9 @@ abstract final class TripPolicy {
   /// 不能改成比現在早。留空代表清除，清除本身不被這條規則擋住。
   static String? expectedReturnRejection(DateTime? proposed, DateTime now) {
     if (proposed == null) return null;
-    if (proposed.isBefore(now.toUtc())) return AppStrings.expectedReturnTooEarly;
+    if (proposed.isBefore(now.toUtc())) {
+      return AppStrings.expectedReturnTooEarly;
+    }
     return null;
   }
 
@@ -101,6 +103,17 @@ abstract final class TripPolicy {
   /// 滿 1 小時（[now] 等於 [expiresAt]）起算過期。
   static bool isInviteExpired(DateTime expiresAt, DateTime now) =>
       !now.toUtc().isBefore(expiresAt.toUtc());
+
+  /// 加入時效期以伺服器時間為準：`expiresAt` 或建立後滿 1 小時，先到者過期。
+  static bool isInviteJoinExpired({
+    required DateTime expiresAt,
+    required DateTime createdAt,
+    required DateTime now,
+  }) {
+    final instant = now.toUtc();
+    return !instant.isBefore(expiresAt.toUtc()) ||
+        !instant.isBefore(createdAt.toUtc().add(inviteLifetime));
+  }
 
   static Duration inviteRemaining(DateTime expiresAt, DateTime now) {
     final remaining = expiresAt.toUtc().difference(now.toUtc());

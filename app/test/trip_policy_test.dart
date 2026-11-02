@@ -39,7 +39,11 @@ void main() {
       isNull,
     );
     expect(
-      TripPolicy.requestExpiresAt(memberCount: 6, hasViceCaptain: true, now: now),
+      TripPolicy.requestExpiresAt(
+        memberCount: 6,
+        hasViceCaptain: true,
+        now: now,
+      ),
       isNotNull,
     );
     expect(
@@ -58,10 +62,7 @@ void main() {
       isFalse,
     );
     expect(
-      TripPolicy.canStart([
-        MemberRole.captain,
-        MemberRole.viceCaptain,
-      ], 8),
+      TripPolicy.canStart([MemberRole.captain, MemberRole.viceCaptain], 8),
       isTrue,
     );
     expect(TripPolicy.canAssignViceCaptain(4), isFalse);
@@ -134,6 +135,22 @@ void main() {
       isFalse,
     );
     expect(TripPolicy.isInviteExpired(expires, expires), isTrue);
+    expect(
+      TripPolicy.isInviteJoinExpired(
+        expiresAt: expires,
+        createdAt: now,
+        now: expires.subtract(const Duration(milliseconds: 1)),
+      ),
+      isFalse,
+    );
+    expect(
+      TripPolicy.isInviteJoinExpired(
+        expiresAt: expires.add(const Duration(hours: 1)),
+        createdAt: now,
+        now: expires,
+      ),
+      isTrue,
+    );
     expect(
       TripPolicy.isInviteExpired(
         expires,

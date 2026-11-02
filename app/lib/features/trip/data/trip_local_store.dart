@@ -112,6 +112,43 @@ class TripLocalStore {
     });
   }
 
+  Future<void> deleteInvite(String code) {
+    return _store.transaction((draft) {
+      final invites = _child(draft, FirestoreSchema.invites);
+      invites.remove(code.trim().toUpperCase());
+      draft[FirestoreSchema.invites] = invites;
+    });
+  }
+
+  /// 建立旅程的伺服器寫入失敗時清掉手機上的旅程、成員、邀請碼與佇列。
+  Future<void> discardTrip(String tripId) {
+    return _store.transaction((draft) {
+      final trips = _child(draft, FirestoreSchema.trips);
+      trips.remove(tripId);
+      draft[FirestoreSchema.trips] = trips;
+
+      final members = _child(draft, FirestoreSchema.members);
+      members.remove(tripId);
+      draft[FirestoreSchema.members] = members;
+
+      final invites = _child(draft, FirestoreSchema.invites);
+      invites.removeWhere((_, value) {
+        if (value is! Map) return false;
+        return value[FirestoreSchema.tripId] == tripId;
+      });
+      draft[FirestoreSchema.invites] = invites;
+
+      final queue = _list(draft, LocalOnlyFields.queue);
+      queue.removeWhere((item) {
+        if (item is! Map) return false;
+        return TripCodec.syncOpFromMap(Map<String, dynamic>.from(item))
+                .tripId ==
+            tripId;
+      });
+      draft[LocalOnlyFields.queue] = queue;
+    });
+  }
+
   Future<void> saveInvite(InviteRecord invite) {
     final code = invite.code.trim().toUpperCase();
     return _store.transaction((draft) {

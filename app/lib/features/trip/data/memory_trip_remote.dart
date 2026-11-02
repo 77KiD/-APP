@@ -36,7 +36,10 @@ class MemoryTripRemote implements TripRemote {
     Future<DateTime> Function() deviceNow,
   ) async {
     final device = (await deviceNow()).toUtc();
-    return ServerClockReading(serverNow: database.clock.toUtc(), deviceNow: device);
+    return ServerClockReading(
+      serverNow: database.clock.toUtc(),
+      deviceNow: device,
+    );
   }
 
   @override
@@ -83,7 +86,10 @@ class MemoryTripRemote implements TripRemote {
 
   @override
   Future<void> upsertRequest(ModificationRequest request) async {
-    final tripRequests = database.requests.putIfAbsent(request.tripId, () => {});
+    final tripRequests = database.requests.putIfAbsent(
+      request.tripId,
+      () => {},
+    );
     tripRequests[request.id] = request;
   }
 
@@ -128,7 +134,11 @@ class MemoryTripRemote implements TripRemote {
     if (invite == null || !database.trips.containsKey(invite.tripId)) {
       throw InviteNotFoundException();
     }
-    if (TripPolicy.isInviteExpired(invite.expiresAt, database.clock)) {
+    if (TripPolicy.isInviteJoinExpired(
+      expiresAt: invite.expiresAt,
+      createdAt: invite.createdAt,
+      now: database.clock,
+    )) {
       throw InviteExpiredException();
     }
     final tripId = invite.tripId;

@@ -45,7 +45,8 @@ void main() {
   }
 
   test('斷網可以建立旅程並讀回來，恢復連線後另一台手機看得到', () async {
-    final database = MemoryTripDatabase()..clock = DateTime.utc(2026, 10, 26, 1);
+    final database = MemoryTripDatabase()
+      ..clock = DateTime.utc(2026, 10, 26, 1);
     final connectivity = ConnectivityProbe(isOnline: false);
     final captain = person('captain', '隊長小美');
     final captainClock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
@@ -68,7 +69,10 @@ void main() {
     expect(database.trips, isEmpty);
     final offlineRead = await captainRepo.getTrip(trip.id);
     expect(offlineRead.title, '京都自由行');
-    expect((await captainRepo.listMembers(trip.id)).single.role, MemberRole.captain);
+    expect(
+      (await captainRepo.listMembers(trip.id)).single.role,
+      MemberRole.captain,
+    );
     expect((await captainRepo.listMembers(trip.id)).single.role.label, '隊長');
 
     connectivity.isOnline = true;
@@ -88,13 +92,18 @@ void main() {
       ids: SequentialId(),
       connectivity: connectivity,
     );
-    final joined = await friendRepo.joinWithInviteCode(trip.inviteCode.toLowerCase());
+    final joined = await friendRepo.joinWithInviteCode(
+      trip.inviteCode.toLowerCase(),
+    );
     final members = await friendRepo.listMembers(joined.id);
     expect(
       members.map((member) => member.role.label),
       containsAll(['隊長', '一般成員']),
     );
-    expect(members.singleWhere((member) => member.userId == 'friend').isMinor, isTrue);
+    expect(
+      members.singleWhere((member) => member.userId == 'friend').isMinor,
+      isTrue,
+    );
 
     final stranger = person('stranger', '路人');
     final strangerRepo = OfflineTripRepository(
@@ -121,7 +130,10 @@ void main() {
     final connectivity = ConnectivityProbe(isOnline: true);
     final captainRepo = OfflineTripRepository(
       local: TripLocalStore(MemoryDocumentStore()),
-      remote: MemoryTripRemote(database: database, currentUserId: () => captain.id),
+      remote: MemoryTripRemote(
+        database: database,
+        currentUserId: () => captain.id,
+      ),
       currentAccount: () => captain,
       clock: FixedDeviceClock(DateTime.utc(2026, 10, 26, 1)),
       ids: SequentialId(),
@@ -181,12 +193,16 @@ void main() {
   });
 
   test('一般成員改預計回程時間會變成修改申請，隊長同意後才寫入', () async {
-    final database = MemoryTripDatabase()..clock = DateTime.utc(2026, 10, 26, 1);
+    final database = MemoryTripDatabase()
+      ..clock = DateTime.utc(2026, 10, 26, 1);
     final connectivity = ConnectivityProbe(isOnline: true);
     final captain = person('captain', '隊長');
     final captainRepo = OfflineTripRepository(
       local: TripLocalStore(MemoryDocumentStore()),
-      remote: MemoryTripRemote(database: database, currentUserId: () => captain.id),
+      remote: MemoryTripRemote(
+        database: database,
+        currentUserId: () => captain.id,
+      ),
       currentAccount: () => captain,
       clock: FixedDeviceClock(DateTime.utc(2026, 10, 26, 1)),
       ids: SequentialId(),
@@ -198,7 +214,10 @@ void main() {
     final friend = person('friend', '阿強');
     final friendRepo = OfflineTripRepository(
       local: TripLocalStore(MemoryDocumentStore()),
-      remote: MemoryTripRemote(database: database, currentUserId: () => friend.id),
+      remote: MemoryTripRemote(
+        database: database,
+        currentUserId: () => friend.id,
+      ),
       currentAccount: () => friend,
       clock: FixedDeviceClock(DateTime.utc(2026, 10, 26, 1)),
       ids: SequentialId(),
@@ -222,7 +241,8 @@ void main() {
   });
 
   test('6 人沒有副隊長時申請不過期，指定副隊長後角色會顯示', () async {
-    final database = MemoryTripDatabase()..clock = DateTime.utc(2026, 10, 26, 1);
+    final database = MemoryTripDatabase()
+      ..clock = DateTime.utc(2026, 10, 26, 1);
     final connectivity = ConnectivityProbe(isOnline: true);
     final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
     final captain = person('captain', '隊長');
@@ -253,9 +273,7 @@ void main() {
         returnTime: '',
       ),
     );
-    final others = [
-      for (var i = 0; i < 5; i++) person('m$i', '成員$i'),
-    ];
+    final others = [for (var i = 0; i < 5; i++) person('m$i', '成員$i')];
     for (final member in others) {
       await repoFor(member).joinWithInviteCode(trip.inviteCode);
     }
@@ -265,9 +283,8 @@ void main() {
     );
     expect(request.expiresAt, isNull);
     await repoFor(captain).assignViceCaptain(tripId: trip.id, userId: 'm0');
-    final labels = (await repoFor(captain).listMembers(trip.id)).map(
-      (member) => member.role.label,
-    );
+    final labels = (await repoFor(captain).listMembers(trip.id))
+        .map((member) => member.role.label);
     expect(labels, containsAll(['隊長', '副隊長', '一般成員']));
     await expectLater(
       repoFor(captain).assignViceCaptain(tripId: trip.id, userId: 'captain'),
@@ -276,7 +293,8 @@ void main() {
   });
 
   test('離線編輯同一天行程時，校正後較晚的版本勝出，另一版進修改紀錄', () async {
-    final database = MemoryTripDatabase()..clock = DateTime.utc(2026, 10, 26, 10);
+    final database = MemoryTripDatabase()
+      ..clock = DateTime.utc(2026, 10, 26, 10);
     final connectivity = ConnectivityProbe(isOnline: true);
     final captain = person('captain', '隊長');
     final friend = person('friend', '阿強');
@@ -290,7 +308,10 @@ void main() {
     );
     final captainRepo = OfflineTripRepository(
       local: TripLocalStore(MemoryDocumentStore()),
-      remote: MemoryTripRemote(database: database, currentUserId: () => captain.id),
+      remote: MemoryTripRemote(
+        database: database,
+        currentUserId: () => captain.id,
+      ),
       currentAccount: () => captain,
       clock: captainClock,
       ids: SequentialId(),
@@ -298,7 +319,10 @@ void main() {
     );
     final friendRepo = OfflineTripRepository(
       local: TripLocalStore(MemoryDocumentStore()),
-      remote: MemoryTripRemote(database: database, currentUserId: () => friend.id),
+      remote: MemoryTripRemote(
+        database: database,
+        currentUserId: () => friend.id,
+      ),
       currentAccount: () => friend,
       clock: friendClock,
       ids: SequentialId(),
@@ -344,12 +368,17 @@ void main() {
     await captainRepo.sync();
     await friendRepo.sync();
     expect(
-      (await friendRepo.readItineraryDay(trip.id, '2026-12-01'))!.spots.single.name,
+      (await friendRepo.readItineraryDay(
+        trip.id,
+        '2026-12-01',
+      ))!.spots.single.name,
       '晚的版本',
     );
     expect(
-      (await captainRepo.readItineraryRevisions(trip.id, '2026-12-01'))
-          .map((revision) => revision.spots.single.name),
+      (await captainRepo.readItineraryRevisions(
+        trip.id,
+        '2026-12-01',
+      )).map((revision) => revision.spots.single.name),
       contains('早的版本'),
     );
   });
@@ -431,7 +460,10 @@ void main() {
       sampleForm(returnDate: '', returnTime: ''),
     );
     final invite = world.database.invites[trip.inviteCode]!;
-    expect(invite.expiresAt.difference(invite.createdAt), const Duration(hours: 1));
+    expect(
+      invite.expiresAt.difference(invite.createdAt),
+      const Duration(hours: 1),
+    );
 
     world.database.clock = invite.expiresAt.subtract(
       const Duration(milliseconds: 1),
@@ -463,12 +495,16 @@ void main() {
       ),
     );
 
-    world.database.clock = invite.expiresAt.add(const Duration(milliseconds: 1));
+    world.database.clock = invite.expiresAt.add(
+      const Duration(milliseconds: 1),
+    );
     await expectLater(
       world
           .repositoryFor(
             person('late', '晚'),
-            deviceClock: FixedDeviceClock(invite.expiresAt.add(const Duration(hours: 5))),
+            deviceClock: FixedDeviceClock(
+              invite.expiresAt.add(const Duration(hours: 5)),
+            ),
           )
           .joinWithInviteCode(trip.inviteCode),
       throwsA(isA<InviteExpiredException>()),
@@ -519,9 +555,14 @@ void main() {
     await world.trips.setPublicInvite(tripId: trip.id, enabled: false);
     expect((await world.trips.getTrip(trip.id)).publicInvite, isFalse);
     expect(world.database.invites[issued.code]!.expiresAt, issued.expiresAt);
-    expect(world.database.invites[original.code]!.expiresAt, original.expiresAt);
+    expect(
+      world.database.invites[original.code]!.expiresAt,
+      original.expiresAt,
+    );
     await expectLater(
-      world.repositoryFor(person('still', '仍可')).joinWithInviteCode(issued.code),
+      world
+          .repositoryFor(person('still', '仍可'))
+          .joinWithInviteCode(issued.code),
       throwsA(
         isA<InviteClosedException>().having(
           (error) => error.message,
@@ -583,7 +624,10 @@ void main() {
         .repositoryFor(person('new-leader', '新隊長碼'))
         .joinWithInviteCode(captainCode.code);
     expect(viaNewLeader.memberIds, contains('new-leader'));
-    expect(world.database.invites[original.code]!.expiresAt, original.expiresAt);
+    expect(
+      world.database.invites[original.code]!.expiresAt,
+      original.expiresAt,
+    );
     expect(world.database.invites[issued.code]!.expiresAt, issued.expiresAt);
 
     world.database.members[trip.id]![member.id] = stored;
@@ -592,6 +636,96 @@ void main() {
       throwsA(isA<RoleChangeException>()),
     );
   });
+
+  test('線上建立時邀請碼寫入失敗，不留下旅程或邀請碼', () async {
+    final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
+    final database = MemoryTripDatabase()..clock = clock.current;
+    final remote = _FailingInviteRemote(
+      database: database,
+      currentUserId: () => 'host',
+    )..failInvites = true;
+    final repo = _repo(clock: clock, database: database, remote: remote);
+    await expectLater(
+      repo.createTrip(_form()),
+      throwsA(
+        isA<ServerWriteException>().having(
+          (error) => error.message,
+          'message',
+          AppStrings.serverWriteFailed,
+        ),
+      ),
+    );
+    expect(await repo.local.readAllTrips(), isEmpty);
+  });
+
+  test('線上產生邀請碼失敗時不顯示新碼，原碼還在', () async {
+    final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
+    final database = MemoryTripDatabase()..clock = clock.current;
+    final remote = _FailingInviteRemote(
+      database: database,
+      currentUserId: () => 'host',
+    );
+    final repo = _repo(clock: clock, database: database, remote: remote);
+    final trip = await repo.createTrip(_form());
+    final before = await repo.listInvites(trip.id);
+    remote.failInvites = true;
+    await expectLater(
+      repo.issueInviteCode(trip.id),
+      throwsA(isA<ServerWriteException>()),
+    );
+    final after = await repo.listInvites(trip.id);
+    expect(
+      after.map((invite) => invite.code),
+      before.map((invite) => invite.code),
+    );
+  });
+}
+
+NewTripForm _form() {
+  return const NewTripForm(
+    title: '寫入失敗',
+    startDate: '2026-12-01',
+    endDate: '2026-12-03',
+    timeZone: 'Asia/Taipei',
+    returnDate: '',
+    returnTime: '',
+  );
+}
+
+OfflineTripRepository _repo({
+  required FixedDeviceClock clock,
+  required MemoryTripDatabase database,
+  required MemoryTripRemote remote,
+}) {
+  const person = UserAccount(
+    id: 'host',
+    email: 'host@example.com',
+    displayName: '隊長',
+    birthday: '2000-01-01',
+    consentDecided: true,
+    analyticsConsent: false,
+    crashlyticsConsent: false,
+  );
+  return OfflineTripRepository(
+    local: TripLocalStore(MemoryDocumentStore()),
+    remote: remote,
+    currentAccount: () => person,
+    clock: clock,
+    ids: SequentialIdGenerator(),
+    connectivity: ConnectivityProbe(isOnline: true),
+  );
+}
+
+class _FailingInviteRemote extends MemoryTripRemote {
+  _FailingInviteRemote({required super.database, required super.currentUserId});
+
+  bool failInvites = false;
+
+  @override
+  Future<void> upsertInvite(InviteRecord invite) async {
+    if (failInvites) throw TripAccessDenied();
+    return super.upsertInvite(invite);
+  }
 }
 
 class SequentialId implements IdGenerator {

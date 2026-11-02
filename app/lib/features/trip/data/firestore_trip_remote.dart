@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:group_trip/core/time/time_rules.dart';
 import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/features/trip/data/firestore_paths.dart';
@@ -64,12 +65,18 @@ class FirestoreTripRemote implements TripRemote {
   Future<void> upsertTrip(Trip trip) {
     return _guard(() async {
       final ref = _trips.doc(trip.id);
-      final existing = await ref.get();
-      if (!existing.exists) {
+      // 建立直接 set。文件不存在時先 get 會讀到 null 的 resource，規則會拒絕。
+      FirebaseException? createDenied;
+      try {
         await ref.set(_tripCreate(trip));
         if (!trip.publicInvite) await ref.update(_closeInvites());
         return;
+      } on FirebaseException catch (error) {
+        if (error.code != 'permission-denied') rethrow;
+        createDenied = error;
       }
+      final existing = await ref.get();
+      if (!existing.exists) throw createDenied;
       final data = existing.data() ?? const <String, dynamic>{};
       if ((data[FirestoreSchema.invitesOpen] == true) != trip.publicInvite) {
         await ref.update(
@@ -205,16 +212,14 @@ class FirestoreTripRemote implements TripRemote {
   Future<void> upsertInvite(InviteRecord invite) {
     return _guard(() async {
       final code = invite.code.trim().toUpperCase();
-      final ref = _invites.doc(code);
-      final existing = await ref.get();
-      if (existing.exists) return;
-      await ref.set({
+      // 不先讀。效期用手機時間加 1 小時，規則允許相對 request.time 前後 5 分鐘。
+      await _invites.doc(code).set({
         FirestoreSchema.tripId: invite.tripId,
         FirestoreSchema.tripTitle: invite.tripTitle,
         FirestoreSchema.createdBy: invite.createdBy,
         FirestoreSchema.creatorRole: invite.issuerRole.wire,
         FirestoreSchema.active: true,
-        FirestoreSchema.expiresAt: await _inviteExpiresAt(),
+        FirestoreSchema.expiresAt: Timestamp.fromDate(invite.expiresAt.toUtc()),
         FirestoreSchema.createdAt: FieldValue.serverTimestamp(),
       });
     });
@@ -242,15 +247,29 @@ class FirestoreTripRemote implements TripRemote {
   Future<Trip> join({required String code, required TripMember member}) {
     return _guard(() async {
       final normalized = code.trim().toUpperCase();
-      final inviteSnap = await _invites.doc(normalized).get();
+      final DocumentSnapshot<Map<String, dynamic>> inviteSnap;
+      try {
+        inviteSnap = await _invites.doc(normalized).get();
+      } on FirebaseException catch (error) {
+        throw _joinUnavailable(error);
+      }
       final data = inviteSnap.data();
       if (!inviteSnap.exists || data == null) throw InviteNotFoundException();
       final record = TripCodec.inviteFromMap(
         _normalize(data),
         code: normalized,
       );
-      final now = await serverNow();
-      if (TripPolicy.isInviteExpired(record.expiresAt, now)) {
+      final DateTime now;
+      try {
+        now = await serverNow();
+      } on TripException {
+        throw InvitePermissionException();
+      }
+      if (TripPolicy.isInviteJoinExpired(
+        expiresAt: record.expiresAt,
+        createdAt: record.createdAt,
+        now: now,
+      )) {
         throw InviteExpiredException();
       }
       final tripId = record.tripId;
@@ -274,9 +293,9 @@ class FirestoreTripRemote implements TripRemote {
           .doc(tripId)
           .collection(FirestorePaths.members)
           .doc(member.userId);
-      final existing = await memberRef.get();
-      if (existing.exists) throw AlreadyMemberException();
       try {
+        final existing = await memberRef.get();
+        if (existing.exists) throw AlreadyMemberException();
         await memberRef.set({
           FirestoreSchema.role: FirestoreSchema.roleMember,
           FirestoreSchema.isMinor: member.isMinor,
@@ -286,8 +305,7 @@ class FirestoreTripRemote implements TripRemote {
           FirestoreSchema.joinedAt: FieldValue.serverTimestamp(),
         });
       } on FirebaseException catch (error) {
-        if (error.code == 'permission-denied') throw InviteClosedException();
-        rethrow;
+        throw _joinUnavailable(error);
       }
       final tripSnap = await _trips.doc(tripId).get();
       final tripData = tripSnap.data();
@@ -453,8 +471,9 @@ class FirestoreTripRemote implements TripRemote {
         .doc(member.tripId)
         .collection(FirestorePaths.members)
         .doc(member.userId);
-    final existing = await ref.get();
-    if (!existing.exists) {
+    // 建立成員也直接 set，不先讀尚未存在的文件。
+    FirebaseException? createDenied;
+    try {
       await ref.set({
         FirestoreSchema.role: member.role.wire,
         FirestoreSchema.isMinor: member.isMinor,
@@ -464,7 +483,12 @@ class FirestoreTripRemote implements TripRemote {
         FirestoreSchema.joinedAt: FieldValue.serverTimestamp(),
       });
       return;
+    } on FirebaseException catch (error) {
+      if (error.code != 'permission-denied') rethrow;
+      createDenied = error;
     }
+    final existing = await ref.get();
+    if (!existing.exists) throw createDenied;
     final currentRole = existing.data()?[FirestoreSchema.role];
     if (currentRole != member.role.wire) {
       await ref.update({FirestoreSchema.role: member.role.wire});
@@ -517,16 +541,6 @@ class FirestoreTripRemote implements TripRemote {
     FirestoreSchema.updatedAt: FieldValue.serverTimestamp(),
   };
 
-  /// 規則把 expiresAt 限制在這次寫入的 request.time 加 1 小時、往前 5 分鐘以內。
-  /// 先寫 clockProbes 讀回伺服器時間，再加 1 小時。探針比邀請寫入早一點，
-  /// 所以這個時間落在窗口裡，也不會超過伺服器的 1 小時上限。
-  Future<Timestamp> _inviteExpiresAt() async {
-    final reading = await readServerClock(() async => DateTime.now().toUtc());
-    return Timestamp.fromDate(
-      reading.serverNow.toUtc().add(const Duration(hours: 1)),
-    );
-  }
-
   Object? _encodeItineraryValue(String key, Object? value) {
     if (key == FirestoreSchema.updatedAt) return FieldValue.serverTimestamp();
     if (value is DateTime) return Timestamp.fromDate(value.toUtc());
@@ -566,12 +580,22 @@ class FirestoreTripRemote implements TripRemote {
     });
   }
 
+  InvitePermissionException _joinUnavailable(FirebaseException error) {
+    _logFirebase(error);
+    return InvitePermissionException();
+  }
+
+  void _logFirebase(FirebaseException error) {
+    debugPrint('FirebaseException code=${error.code} message=${error.message}');
+  }
+
   Future<T> _guard<T>(Future<T> Function() body) async {
     try {
       return await body();
     } on TripException {
       rethrow;
     } on FirebaseException catch (error) {
+      _logFirebase(error);
       if (error.code == 'permission-denied') throw TripAccessDenied();
       throw TripException(error.message ?? 'Firestore 拒絕了這次寫入');
     }
