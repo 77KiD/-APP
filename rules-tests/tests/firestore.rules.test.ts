@@ -1149,14 +1149,14 @@ describe("finalVersionId and 30-day span", () => {
     await assertSucceeds(setDoc(doc(db(host), "trips/final-omit"), newTrip(host)));
   });
 
-  it("allows a 30-day span and rejects 31 days on create and update", async () => {
+  it("allows an inclusive 30-day span and rejects the next day on create and update", async () => {
     const host = "span-host";
     await assertSucceeds(setDoc(doc(db(host), `users/${host}`), profile(utcMidnightYearsAgo(30), "隊長")));
     await assertSucceeds(
       setDoc(doc(db(host), "trips/span-30"), {
         ...newTrip(host),
         startDate: "2030-01-01",
-        endDate: "2030-01-31",
+        endDate: "2030-01-30",
       }),
     );
     await assertSucceeds(
@@ -1170,21 +1170,21 @@ describe("finalVersionId and 30-day span", () => {
       setDoc(doc(db(host), "trips/span-31"), {
         ...newTrip(host),
         startDate: "2030-01-01",
-        endDate: "2030-02-01",
+        endDate: "2030-01-31",
       }),
     );
     await assertSucceeds(
       setDoc(doc(db(host), "trips/span-leap"), {
         ...newTrip(host),
         startDate: "2028-02-01",
-        endDate: "2028-03-02",
+        endDate: "2028-03-01",
       }),
     );
     await assertFails(
       setDoc(doc(db(host), "trips/span-leap-over"), {
         ...newTrip(host),
         startDate: "2028-02-01",
-        endDate: "2028-03-03",
+        endDate: "2028-03-02",
       }),
     );
 
@@ -1202,15 +1202,15 @@ describe("finalVersionId and 30-day span", () => {
     );
     await assertSucceeds(
       updateDoc(doc(db(member), `trips/${tripId}`), {
-        endDate: "2030-01-31",
+        endDate: "2030-01-30",
         updatedAt: serverTimestamp(),
       }),
     );
     const stretched = await assertSucceeds(getDoc(doc(db(member), `trips/${tripId}`)));
-    assert.equal(stretched.get("endDate"), "2030-01-31");
+    assert.equal(stretched.get("endDate"), "2030-01-30");
   });
 
-  it("blocks other edits until a span over 30 days is shortened", async () => {
+  it("blocks other edits until a span over 30 inclusive days is shortened", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       await updateDoc(doc(ctx.firestore(), `trips/${tripId}`), {
         startDate: "2030-01-01",
@@ -1231,7 +1231,7 @@ describe("finalVersionId and 30-day span", () => {
     );
     await assertSucceeds(
       updateDoc(doc(db(leader), `trips/${tripId}`), {
-        endDate: "2030-01-31",
+        endDate: "2030-01-30",
         updatedAt: serverTimestamp(),
       }),
     );
