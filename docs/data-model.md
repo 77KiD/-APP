@@ -162,8 +162,8 @@ trips/{tripId}
 | `title` | string | 1–60 字。任何成員 |
 | `leaderId` | string | 建立時等於建立者。之後不可改（交接在 #14，走 Admin SDK） |
 | `status` | `"planning"` \| `"active"` \| `"ended"` | 見下方 |
-| `startDate` | string | `YYYY-MM-DD`，旅程當地日曆。任何成員。須 `<= endDate` |
-| `endDate` | string | 結束日期，格式同上 |
+| `startDate` | string | `YYYY-MM-DD`，旅程當地日曆。任何成員。須 `<= endDate`。結束日期減出發日期最多 30 天（ADR 0010） |
+| `endDate` | string | 結束日期，格式同上。建立與每一次客戶端更新都檢查這 30 天上限 |
 | `timeZone` | string | IANA，例如 `Asia/Taipei`。沒填預計回程時間時，用它算結束日 23:59 |
 | `expectedReturnAt` | timestamp \| null | **預計回程時間**。null 表示改走結束日 23:59。改成比 `request.time` 早會被拒絕。隊長或副隊長可直接改；一般成員只能送修改申請 |
 | `generalTransport` | string \| null | **一般交通**（測試計畫裡的旅途中交通）。最多 200 字。權限同預計回程時間 |
@@ -174,6 +174,7 @@ trips/{tripId}
 | `endReason` | string \| null | 未結束時必須是 null。客戶端整團結束只能寫 `leader_manual`。排程寫 `expected_return` 或 `end_date` |
 | `invitesOpen` | bool | 建立時必須 true。true 時任何成員可發邀請碼；false 時只有隊長或副隊長。隊長或副隊長都能改，而且這次寫入不能順便改其他旅程欄位 |
 | `invitesResetAt` | timestamp \| null | 建立時必須 null。關掉邀請的那一筆把它設成 `request.time`。只擋 `creatorRole == "member"` 且 `createdAt` 更早的碼。隊長或副隊長發的碼不看這個欄位。打開邀請時必須維持原值，被擋下的一般成員碼不會復活 |
+| `finalVersionId` | string \| null | 定案版本，指向 `versions/{versionId}`。可以省略。省略或 `null` 都是尚未定案。有值時是 1–128 字的版本 id。只有隊長或副隊長能設定、更換或清回 `null`，而且那一筆只能改 `finalVersionId` 與 `updatedAt`。建立時隊長可以一併寫入。見 ADR 0010 |
 | `createdAt` / `updatedAt` | timestamp | 伺服器時間。`createdAt` 不變 |
 
 `status`：
@@ -182,6 +183,8 @@ trips/{tripId}
 - 隊長開始：`planning` → `active`，並寫 `startedAt`。這次寫入不能順便改交通或預計回程時間。
 - 隊長或副隊長整團結束：`status = ended`、`endReason = leader_manual`、`endedAt` 為伺服器時間。一般成員按結束是個人結束（#14），這份規則不提供整團 `ended`。
 - 結束後客戶端不能再改旅程本體。行程與景點仍可讀，位置不可讀。
+
+定案（ADR 0010）：旅程上的定案欄位只有 `finalVersionId`。`2030-01-01` 到 `2030-01-31` 是 30 天，可以建立或改成這個區間；到 `2030-02-01` 是 31 天，建立與更新都會被拒絕。閏年照日曆日計算。已經超過 30 天的旅程，客戶端要先把日期收進 30 天才改得了其他欄位。
 
 建立順序：
 
