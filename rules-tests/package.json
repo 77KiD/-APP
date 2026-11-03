@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "tsx --test --test-concurrency=1 tests/firestore.rules.test.ts"
+    "test": "tsx --test --test-concurrency=1 tests/firestore.rules.test.ts tests/trip_length_boundary.test.ts"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",
