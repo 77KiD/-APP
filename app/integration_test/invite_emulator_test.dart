@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:group_trip/core/ids/id_generator.dart';
+import 'package:group_trip/data/firestore_schema.dart';
 import 'package:group_trip/core/persistence/json_document_store.dart';
 import 'package:group_trip/core/time/time_rules.dart';
 import 'package:group_trip/features/auth/data/firebase_auth_repository.dart';
 import 'package:group_trip/features/auth/domain/auth_models.dart';
+import 'package:group_trip/features/trip/data/firestore_paths.dart';
 import 'package:group_trip/features/trip/data/firestore_trip_remote.dart';
 import 'package:group_trip/features/trip/data/offline_trip_repository.dart';
 import 'package:group_trip/features/trip/data/trip_local_store.dart';
@@ -77,6 +81,8 @@ class _InviteEmulatorAppState extends State<InviteEmulatorApp> {
       await _happyPath(authRepo);
       _setStatus('RUNNING join errors');
       await _joinErrors(authRepo);
+      _setStatus('RUNNING closed invite');
+      await _closedPublicInvite(authRepo);
       _setStatus('RUNNING skew');
       await _clockSkew(authRepo);
       _setStatus('ALL PASS');
@@ -92,9 +98,7 @@ class _InviteEmulatorAppState extends State<InviteEmulatorApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(body: Text(_status)),
-    );
+    return MaterialApp(home: Scaffold(body: Text(_status)));
   }
 }
 
@@ -167,18 +171,142 @@ Future<void> _joinErrors(FirebaseAuthRepository authRepo) async {
   await FirebaseAuth.instance.signOut();
 }
 
+Future<void> _closedPublicInvite(FirebaseAuthRepository authRepo) async {
+  final clock = FixedDeviceClock(DateTime.now().toUtc());
+  final captain = await _signUp(authRepo, '關閉隊長');
+  final captainRepo = _repository(authRepo, clock);
+  final trip = await captainRepo.createTrip(_form('關閉團'));
+  final captainCode = trip.inviteCode;
+  _check(captainCode.isNotEmpty, '隊長應有邀請碼');
+
+  await authRepo.signOut();
+  await _signUp(authRepo, '發碼成員');
+  final memberRepo = _repository(authRepo, clock);
+  await memberRepo.joinWithInviteCode(captainCode);
+  final memberCode = await memberRepo.issueInviteCode(trip.id);
+  _check(memberCode.issuerRole == MemberRole.member, '一般成員產生的碼');
+
+  await authRepo.signOut();
+  final vice = await _signUp(authRepo, '副隊長');
+  final viceRepo = _repository(authRepo, clock);
+  await viceRepo.joinWithInviteCode(captainCode);
+
+  await authRepo.signOut();
+  final captainSignIn = await authRepo.signIn(
+    email: captain.email,
+    password: 'password1',
+  );
+  if (captainSignIn.failure != null || captainSignIn.account == null) {
+    throw StateError('隊長重新登入失敗 ${captainSignIn.failure?.message}');
+  }
+  await FirebaseFirestore.instance
+      .collection(FirestorePaths.trips)
+      .doc(trip.id)
+      .collection(FirestorePaths.members)
+      .doc(vice.id)
+      .update({FirestoreSchema.role: FirestoreSchema.roleDeputy});
+
+  await authRepo.signOut();
+  final viceSignIn = await authRepo.signIn(
+    email: vice.email,
+    password: 'password1',
+  );
+  if (viceSignIn.failure != null || viceSignIn.account == null) {
+    throw StateError('副隊長重新登入失敗 ${viceSignIn.failure?.message}');
+  }
+  final viceCode = await viceRepo.issueInviteCode(trip.id);
+  _check(viceCode.issuerRole == MemberRole.viceCaptain, '副隊長產生的碼');
+
+  await authRepo.signOut();
+  final closeSignIn = await authRepo.signIn(
+    email: captain.email,
+    password: 'password1',
+  );
+  if (closeSignIn.failure != null || closeSignIn.account == null) {
+    throw StateError('隊長關邀請前登入失敗 ${closeSignIn.failure?.message}');
+  }
+  final closed = await captainRepo.setPublicInvite(
+    tripId: trip.id,
+    enabled: false,
+  );
+  _check(!closed.publicInvite, '公開邀請應關閉');
+  await authRepo.signOut();
+
+  await _signUp(authRepo, '用成員碼');
+  final memberGuest = _repository(authRepo, clock);
+  try {
+    await memberGuest.joinWithInviteCode(memberCode.code);
+    throw StateError('公開邀請關閉後，一般成員的碼不該加入');
+  } on InviteClosedException catch (error) {
+    _check(
+      error.message == AppStrings.inviteClosedByPublicInvite,
+      '公開邀請已關閉的訊息',
+    );
+  }
+  await authRepo.signOut();
+
+  await _signUp(authRepo, '用隊長碼');
+  final captainGuest = _repository(authRepo, clock);
+  final viaCaptain = await captainGuest.joinWithInviteCode(captainCode);
+  _check(viaCaptain.id == trip.id, '隊長的碼仍可加入');
+  await authRepo.signOut();
+
+  await _signUp(authRepo, '用副隊長碼');
+  final viceGuest = _repository(authRepo, clock);
+  final viaVice = await viceGuest.joinWithInviteCode(viceCode.code);
+  _check(viaVice.id == trip.id, '副隊長的碼仍可加入');
+  await authRepo.signOut();
+
+  await _signUp(authRepo, '寫入斷線');
+  final offlineGuest = _repository(
+    authRepo,
+    clock,
+    remote: _MemberWriteOfflineRemote(
+      firestore: FirebaseFirestore.instance,
+      currentUserId: () => FirebaseAuth.instance.currentUser?.uid ?? '',
+    ),
+  );
+  final logs = <String>[];
+  final previous = debugPrint;
+  debugPrint = (String? message, {int? wrapWidth}) {
+    logs.add(message ?? '');
+  };
+  try {
+    await offlineGuest.joinWithInviteCode(memberCode.code);
+    throw StateError('成員寫入斷線不該加入成功');
+  } on InvitePermissionException catch (error) {
+    _check(error.message == AppStrings.invitePermissionOrNetwork, '斷線仍是原本的訊息');
+    _check(
+      error.message != AppStrings.inviteClosedByPublicInvite,
+      '斷線不能顯示公開邀請已關閉',
+    );
+  } on InviteClosedException catch (error) {
+    throw StateError('斷線不該顯示公開邀請已關閉 ${error.message}');
+  } finally {
+    debugPrint = previous;
+  }
+  _check(
+    logs.join('\n').contains('code=unavailable'),
+    '成員寫入要記下 unavailable，實際 ${logs.join(' | ')}',
+  );
+  await authRepo.signOut();
+}
+
 Future<void> _clockSkew(FirebaseAuthRepository authRepo) async {
   final clock = FixedDeviceClock(DateTime.now().toUtc());
   await _signUp(authRepo, '時鐘');
   final repo = _repository(authRepo, clock);
   final trip = await repo.createTrip(_form('時鐘團'));
-  final before = (await repo.listInvites(trip.id)).map((invite) => invite.code).toSet();
+  final before = (await repo.listInvites(trip.id))
+      .map((invite) => invite.code)
+      .toSet();
 
   clock.current = DateTime.now().toUtc().add(const Duration(minutes: 2));
   final issued = await repo.issueInviteCode(trip.id);
   _check(issued.code.isNotEmpty, '快 2 分鐘仍應產生邀請碼');
   _check(
-    (await repo.listInvites(trip.id)).any((invite) => invite.code == issued.code),
+    (await repo.listInvites(trip.id))
+        .any((invite) => invite.code == issued.code),
     '快 2 分鐘的碼要顯示',
   );
 
@@ -196,8 +324,13 @@ Future<void> _clockSkew(FirebaseAuthRepository authRepo) async {
   } finally {
     debugPrint = previous;
   }
-  _check(logs.join('\n').contains('permission-denied'), '要記下 FirebaseException');
-  final after = (await repo.listInvites(trip.id)).map((invite) => invite.code).toSet();
+  _check(
+    logs.join('\n').contains('permission-denied'),
+    '要記下 FirebaseException',
+  );
+  final after = (await repo.listInvites(trip.id))
+      .map((invite) => invite.code)
+      .toSet();
   _check(after.contains(issued.code), '原本快 2 分鐘的碼還在');
   _check(after.difference(before).length == 1, '快 10 分鐘不能多一個碼');
   await authRepo.signOut();
@@ -210,7 +343,10 @@ String _email(String label) {
   return '$label-$_serial@example.com';
 }
 
-Future<UserAccount> _signUp(FirebaseAuthRepository authRepo, String name) async {
+Future<UserAccount> _signUp(
+  FirebaseAuthRepository authRepo,
+  String name,
+) async {
   final outcome = await authRepo.signUp(
     email: _email(name),
     password: 'password1',
@@ -230,14 +366,17 @@ OfflineTripRepository _repository(
   FirebaseAuthRepository authRepo,
   DeviceClock clock, {
   String? accountId,
+  FirestoreTripRemote? remote,
 }) {
   final auth = FirebaseAuth.instance;
   return OfflineTripRepository(
     local: TripLocalStore(MemoryDocumentStore()),
-    remote: FirestoreTripRemote(
-      firestore: FirebaseFirestore.instance,
-      currentUserId: () => accountId ?? auth.currentUser?.uid ?? '',
-    ),
+    remote:
+        remote ??
+        FirestoreTripRemote(
+          firestore: FirebaseFirestore.instance,
+          currentUserId: () => accountId ?? auth.currentUser?.uid ?? '',
+        ),
     currentAccount: () {
       final current = authRepo.current;
       if (current != null) return current;
@@ -257,6 +396,40 @@ OfflineTripRepository _repository(
     ids: RandomIdGenerator(),
     connectivity: ConnectivityProbe(isOnline: true),
   );
+}
+
+/// 網頁版 Firestore 的 `set` 在斷線時會排隊、不會拒絕。
+/// 這裡仍對成員文件呼叫 `set`，再向伺服器讀一次，取得真實的 `unavailable`。
+class _MemberWriteOfflineRemote extends FirestoreTripRemote {
+  _MemberWriteOfflineRemote({required super.currentUserId, super.firestore});
+
+  @override
+  Future<void> commitJoinMember(
+    DocumentReference<Map<String, dynamic>> ref,
+    Map<String, dynamic> data,
+  ) async {
+    final firestore = FirebaseFirestore.instance;
+    await firestore.disableNetwork();
+    final pending = super.commitJoinMember(ref, data);
+    pending.then((_) {}, onError: (Object _) {});
+    try {
+      await ref
+          .get(const GetOptions(source: Source.server))
+          .timeout(const Duration(seconds: 8));
+      throw StateError('斷線時不該從伺服器讀到這次要寫的成員文件');
+    } on TimeoutException {
+      throw StateError('斷線讀取逾時，沒有拿到 unavailable');
+    } on FirebaseException catch (error) {
+      if (error.code != 'unavailable') {
+        throw StateError(
+          '成員寫入遇到的網路錯誤應為 unavailable，實際 ${error.code} ${error.message}',
+        );
+      }
+      rethrow;
+    } finally {
+      await firestore.enableNetwork();
+    }
+  }
 }
 
 NewTripForm _form(String title) {

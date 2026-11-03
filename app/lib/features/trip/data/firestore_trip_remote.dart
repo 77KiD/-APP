@@ -296,7 +296,11 @@ class FirestoreTripRemote implements TripRemote {
       try {
         final existing = await memberRef.get();
         if (existing.exists) throw AlreadyMemberException();
-        await memberRef.set({
+      } on FirebaseException catch (error) {
+        throw _joinUnavailable(error);
+      }
+      try {
+        await commitJoinMember(memberRef, {
           FirestoreSchema.role: FirestoreSchema.roleMember,
           FirestoreSchema.isMinor: member.isMinor,
           FirestoreSchema.displayName: member.displayName,
@@ -305,7 +309,11 @@ class FirestoreTripRemote implements TripRemote {
           FirestoreSchema.joinedAt: FieldValue.serverTimestamp(),
         });
       } on FirebaseException catch (error) {
-        throw _joinUnavailable(error);
+        // 外人讀不到旅程，所以關邀請這件事是由規則拒絕這次寫入。
+        // creatorRole 在上面的邀請文件裡。只有伺服器明確拒絕，
+        // 而且是一般成員的碼，才換成公開邀請已關閉。
+        _logFirebase(error);
+        throw exceptionForMemberJoinWrite(error, record.issuerRole);
       }
       final tripSnap = await _trips.doc(tripId).get();
       final tripData = tripSnap.data();
@@ -578,6 +586,29 @@ class FirestoreTripRemote implements TripRemote {
       }
       return MapEntry(key, value);
     });
+  }
+
+  /// 加入時寫入成員文件。測試可覆寫，用來讓這次寫入遇到真實的斷線。
+  Future<void> commitJoinMember(
+    DocumentReference<Map<String, dynamic>> ref,
+    Map<String, dynamic> data,
+  ) {
+    return ref.set(data);
+  }
+
+  /// 成員寫入失敗時要顯示的錯誤。
+  ///
+  /// 邀請文件在寫入前已經讀到 [issuerRole]。只有伺服器以
+  /// `permission-denied` 拒絕，而且產生者是一般成員，才是公開邀請已關閉。
+  /// 斷線、逾時、`unavailable`，或隊長、副隊長的碼被拒絕，維持原本的訊息。
+  static TripException exceptionForMemberJoinWrite(
+    FirebaseException error,
+    MemberRole issuerRole,
+  ) {
+    if (error.code == 'permission-denied' && issuerRole == MemberRole.member) {
+      return InviteClosedException();
+    }
+    return InvitePermissionException();
   }
 
   InvitePermissionException _joinUnavailable(FirebaseException error) {
