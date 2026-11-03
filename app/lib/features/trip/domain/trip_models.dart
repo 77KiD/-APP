@@ -446,6 +446,14 @@ class InviteNotFoundException extends TripException {
   InviteNotFoundException() : super(AppStrings.inviteNotFound);
 }
 
+class InvitePermissionException extends TripException {
+  InvitePermissionException() : super(AppStrings.invitePermissionOrNetwork);
+}
+
+class ServerWriteException extends TripException {
+  ServerWriteException() : super(AppStrings.serverWriteFailed);
+}
+
 class InviteExpiredException extends TripException {
   InviteExpiredException() : super(AppStrings.inviteExpired);
 }

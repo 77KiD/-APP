@@ -256,6 +256,79 @@ describe("registration under 13", () => {
   });
 });
 
+describe("app trip create payload", () => {
+  it("lets the creator read a missing trip and their own missing member doc, then create both", async () => {
+    const host = "app-host";
+    const stranger = "app-stranger";
+    const appTripId = "app-trip-1";
+
+    await assertSucceeds(setDoc(doc(db(host), `users/${host}`), profile(utcMidnightYearsAgo(30), "隊長")));
+    await assertSucceeds(
+      setDoc(doc(db(stranger), `users/${stranger}`), profile(utcMidnightYearsAgo(30), "路人")),
+    );
+
+    const missingTrip = await assertSucceeds(getDoc(doc(db(host), `trips/${appTripId}`)));
+    assert.equal(missingTrip.exists(), false);
+    const strangerProbe = await assertSucceeds(getDoc(doc(db(stranger), `trips/${appTripId}`)));
+    assert.equal(strangerProbe.exists(), false);
+    await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), `trips/${appTripId}`)));
+
+    await assertSucceeds(
+      setDoc(doc(db(host), `trips/${appTripId}`), {
+        schemaVersion: 1,
+        title: "週末出遊",
+        leaderId: host,
+        status: "planning",
+        startDate: "2030-04-01",
+        endDate: "2030-04-02",
+        timeZone: "Asia/Taipei",
+        expectedReturnAt: null,
+        generalTransport: null,
+        returnTransport: null,
+        returnFlight: null,
+        startedAt: null,
+        endedAt: null,
+        endReason: null,
+        invitesOpen: true,
+        invitesResetAt: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+
+    await assertFails(getDoc(doc(db(stranger), `trips/${appTripId}`)));
+
+    const missingMember = await assertSucceeds(
+      getDoc(doc(db(host), `trips/${appTripId}/members/${host}`)),
+    );
+    assert.equal(missingMember.exists(), false);
+    const ownMissing = await assertSucceeds(
+      getDoc(doc(db(stranger), `trips/${appTripId}/members/${stranger}`)),
+    );
+    assert.equal(ownMissing.exists(), false);
+    await assertFails(getDoc(doc(db(stranger), `trips/${appTripId}/members/${host}`)));
+    await assertFails(getDocs(collection(db(stranger), `trips/${appTripId}/members`)));
+    await assertFails(getDocs(collection(db(host), `trips/${appTripId}/members`)));
+
+    await assertSucceeds(
+      setDoc(doc(db(host), `trips/${appTripId}/members/${host}`), {
+        role: "leader",
+        isMinor: false,
+        displayName: "隊長",
+        photoUrl: null,
+        inviteCode: null,
+        joinedAt: serverTimestamp(),
+      }),
+    );
+
+    await assertFails(getDoc(doc(db(stranger), `trips/${appTripId}/members/${host}`)));
+    const created = await assertSucceeds(getDoc(doc(db(host), `trips/${appTripId}`)));
+    assert.equal(created.get("timeZone"), "Asia/Taipei");
+    assert.equal(created.get("generalTransport"), null);
+    assert.equal(created.get("expectedReturnAt"), null);
+  });
+});
+
 describe("trip membership isolation", () => {
   it("creates a trip, invite, and membership, and blocks non-members", async () => {
     const host = "host";
@@ -836,10 +909,34 @@ describe("invite expiry and invitesOpen", () => {
     await assertSucceeds(join("guest-b", "MEMBERCD1"));
     await assertSucceeds(join("guest-c", "DEPUTYCD1"));
 
-    const tooLate = Timestamp.fromMillis(Date.now() + 61 * 60 * 1000);
+    const tooLate = Timestamp.fromMillis(Date.now() + 70 * 60 * 1000);
     const tooSoon = Timestamp.fromMillis(Date.now() + 30 * 60 * 1000);
     await assertFails(setDoc(doc(db(member), "invites/TOOLATE01"), inviteDoc(member, tooLate)));
     await assertFails(setDoc(doc(db(member), "invites/TOOSOON01"), inviteDoc(member, tooSoon)));
+  });
+
+  it("accepts expiresAt within five minutes of request.time plus one hour", async () => {
+    const hour = 60 * 60 * 1000;
+    const minute = 60 * 1000;
+    const now = Date.now();
+    await assertSucceeds(
+      setDoc(
+        doc(db(member), "invites/SKEWPLUS2"),
+        inviteDoc(member, Timestamp.fromMillis(now + hour + 2 * minute)),
+      ),
+    );
+    await assertSucceeds(
+      setDoc(
+        doc(db(member), "invites/SKEWMINS2"),
+        inviteDoc(member, Timestamp.fromMillis(now + hour - 2 * minute)),
+      ),
+    );
+    await assertFails(
+      setDoc(
+        doc(db(member), "invites/SKEWPLS10"),
+        inviteDoc(member, Timestamp.fromMillis(now + hour + 10 * minute)),
+      ),
+    );
   });
 
   it("judges expiry from request.time, including a stretched expiresAt", async () => {

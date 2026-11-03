@@ -85,11 +85,9 @@ abstract final class AppStrings {
   static const publicInvite = '公開邀請';
   static const publicInviteHelp =
       '開啟時，任何成員都可以產生邀請碼。關閉後，只有隊長和副隊長可以產生，一般成員已經產生的邀請碼會立刻失效，再打開也不會恢復。隊長和副隊長產生的邀請碼仍用到各自的到期時間。隊長和副隊長都可以切換這項設定。';
-  static const inviteRestricted =
-      '公開邀請已關閉。現在只有隊長和副隊長可以產生邀請碼。一般成員已經產生的邀請碼已失效。';
+  static const inviteRestricted = '公開邀請已關閉。現在只有隊長和副隊長可以產生邀請碼。一般成員已經產生的邀請碼已失效。';
   static const cannotIssueInvite = inviteRestricted;
-  static const inviteClosedByPublicInvite =
-      '公開邀請已關閉，一般成員產生的邀請碼已失效';
+  static const inviteClosedByPublicInvite = '公開邀請已關閉，一般成員產生的邀請碼已失效';
   static const onlyLeadersSetPublicInvite = '只有隊長和副隊長可以變更公開邀請';
   static const inviteAdvisory = '剩餘時間依這台手機估算，實際是否過期以伺服器時間為準。';
   static String copyInviteCode(String code) => '複製邀請碼 $code';
@@ -108,6 +106,7 @@ abstract final class AppStrings {
     if (parts.isEmpty) return inviteExpired;
     return '這個邀請碼還能使用 ${parts.join(' ')}';
   }
+
   static const members = '成員';
   static const roleCaptain = '隊長';
   static const roleVice = '副隊長';
@@ -131,6 +130,8 @@ abstract final class AppStrings {
   static const submitJoin = '加入旅程';
   static const emptyInvite = '請輸入邀請碼';
   static const inviteNotFound = '找不到這個邀請碼';
+  static const invitePermissionOrNetwork = '沒有權限或網路中斷，無法加入旅程';
+  static const serverWriteFailed = '沒有寫入伺服器，邀請碼不會顯示。請再試一次。';
   static const alreadyMember = '你已經是這個旅程的成員';
   static const notMember = '你不是這個旅程的成員';
   static const joinNeedsNetwork = '加入旅程需要網路。邀請碼核對通過後，旅程會存到這台手機。';

@@ -37,6 +37,7 @@ class OfflineTripRepository implements TripRepository {
   Future<Trip> createTrip(NewTripForm form) async {
     final account = _account();
     final now = await _stamp();
+    final deviceNow = await clock.now();
     final parsed = TripPolicy.parseNewTrip(form, now);
     if (parsed.error != null) throw ValidationException(parsed.error!);
     final trip = Trip(
@@ -72,6 +73,7 @@ class OfflineTripRepository implements TripRepository {
         createdBy: account.id,
         issuerRole: MemberRole.captain,
         createdAt: now,
+        expiresAt: deviceNow.toUtc().add(TripPolicy.inviteLifetime),
       ),
     );
     await local.enqueue(SyncOp(type: SyncOpType.upsertTrip, tripId: trip.id));
@@ -89,6 +91,14 @@ class OfflineTripRepository implements TripRepository {
         entityId: trip.inviteCode,
       ),
     );
+    if (connectivity.isOnline) {
+      try {
+        await _pushTrip(trip.id);
+      } on TripException {
+        await local.discardTrip(trip.id);
+        throw ServerWriteException();
+      }
+    }
     await _trySync();
     return (await local.readTrip(trip.id)) ?? trip;
   }
@@ -463,6 +473,7 @@ class OfflineTripRepository implements TripRepository {
       throw RoleChangeException(AppStrings.cannotIssueInvite);
     }
     final now = await _stamp();
+    final deviceNow = await clock.now();
     final invite = _issued(
       code: await _freshCode(),
       tripId: trip.id,
@@ -470,6 +481,7 @@ class OfflineTripRepository implements TripRepository {
       createdBy: account.id,
       issuerRole: self.role,
       createdAt: now,
+      expiresAt: deviceNow.toUtc().add(TripPolicy.inviteLifetime),
     );
     await local.saveInvite(invite);
     await local.enqueue(
@@ -479,6 +491,21 @@ class OfflineTripRepository implements TripRepository {
         entityId: invite.code,
       ),
     );
+    if (connectivity.isOnline) {
+      try {
+        await _pushTrip(trip.id);
+      } on TripException {
+        await local.deleteInvite(invite.code);
+        await local.removeOp(
+          SyncOp(
+            type: SyncOpType.upsertInvite,
+            tripId: trip.id,
+            entityId: invite.code,
+          ),
+        );
+        throw ServerWriteException();
+      }
+    }
     await _trySync();
     return (await local.readInvite(invite.code)) ?? invite;
   }
@@ -622,6 +649,18 @@ class OfflineTripRepository implements TripRepository {
     await _recordTimeSample();
   }
 
+  Future<void> _pushTrip(String tripId) async {
+    if (!connectivity.isOnline) return;
+    final queue = await local.readQueue();
+    for (final op in queue) {
+      if (op.tripId != tripId || op.type == SyncOpType.upsertItinerary) {
+        continue;
+      }
+      await _push(op);
+      await local.removeOp(op);
+    }
+  }
+
   Future<void> _trySync() async {
     if (!connectivity.isOnline) return;
     try {
@@ -762,15 +801,18 @@ class OfflineTripRepository implements TripRepository {
     required String createdBy,
     required MemberRole issuerRole,
     required DateTime createdAt,
+    DateTime? expiresAt,
   }) {
+    final created = createdAt.toUtc();
     return InviteRecord(
       code: code.trim().toUpperCase(),
       tripId: tripId,
       tripTitle: tripTitle,
       createdBy: createdBy,
       issuerRole: issuerRole,
-      createdAt: createdAt.toUtc(),
-      expiresAt: TripPolicy.inviteExpiresAt(createdAt),
+      createdAt: created,
+      // 寫進規則的效期跟手機時鐘走。前後 5 分鐘內可寫，超過就拒絕。
+      expiresAt: (expiresAt ?? created.add(TripPolicy.inviteLifetime)).toUtc(),
     );
   }
 
