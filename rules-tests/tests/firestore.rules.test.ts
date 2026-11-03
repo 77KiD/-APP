@@ -1158,3 +1158,179 @@ describe("clock probe", () => {
     await assertFails(setDoc(doc(anon, path), { t: serverTimestamp() }));
   });
 });
+
+describe("finalVersionId and 30-day span", () => {
+  beforeEach(async () => {
+    await seedOpenTrip();
+  });
+
+  it("lets only the leader or deputy set, replace, and clear finalVersionId", async () => {
+    await assertFails(
+      updateDoc(doc(db(member), `trips/${tripId}`), {
+        finalVersionId: "version-1",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db(outsider), `trips/${tripId}`), {
+        finalVersionId: "version-1",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db(deputy), `trips/${tripId}`), {
+        finalVersionId: "version-1",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    const stamped = await assertSucceeds(getDoc(doc(db(deputy), `trips/${tripId}`)));
+    assert.equal(stamped.get("finalVersionId"), "version-1");
+
+    await assertSucceeds(
+      updateDoc(doc(db(leader), `trips/${tripId}`), {
+        finalVersionId: "version-2",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db(member), `trips/${tripId}`), {
+        finalVersionId: null,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db(deputy), `trips/${tripId}`), {
+        finalVersionId: "",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db(leader), `trips/${tripId}`), {
+        finalVersionId: "version-3",
+        title: "順便改名",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db(leader), `trips/${tripId}`), {
+        finalVersionId: null,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    const cleared = await assertSucceeds(getDoc(doc(db(leader), `trips/${tripId}`)));
+    assert.equal(cleared.get("finalVersionId"), null);
+
+    await assertSucceeds(
+      updateDoc(doc(db(leader), `trips/${tripId}`), {
+        finalVersionId: "version-2",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db(member), `trips/${tripId}`), {
+        title: "成員改名",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    const kept = await assertSucceeds(getDoc(doc(db(member), `trips/${tripId}`)));
+    assert.equal(kept.get("finalVersionId"), "version-2");
+    assert.equal(kept.get("title"), "成員改名");
+  });
+
+  it("lets the leader store finalVersionId on create, including null", async () => {
+    const host = "final-host";
+    await assertSucceeds(setDoc(doc(db(host), `users/${host}`), profile(utcMidnightYearsAgo(30), "隊長")));
+    await assertSucceeds(setDoc(doc(db(host), "trips/final-null"), { ...newTrip(host), finalVersionId: null }));
+    await assertSucceeds(setDoc(doc(db(host), "trips/final-set"), { ...newTrip(host), finalVersionId: "version-1" }));
+    await assertFails(setDoc(doc(db(host), "trips/final-empty"), { ...newTrip(host), finalVersionId: "" }));
+    await assertSucceeds(setDoc(doc(db(host), "trips/final-omit"), newTrip(host)));
+  });
+
+  it("allows an inclusive 30-day span and rejects the next day on create and update", async () => {
+    const host = "span-host";
+    await assertSucceeds(setDoc(doc(db(host), `users/${host}`), profile(utcMidnightYearsAgo(30), "隊長")));
+    await assertSucceeds(
+      setDoc(doc(db(host), "trips/span-30"), {
+        ...newTrip(host),
+        startDate: "2030-01-01",
+        endDate: "2030-01-30",
+      }),
+    );
+    await assertSucceeds(
+      setDoc(doc(db(host), "trips/span-same"), {
+        ...newTrip(host),
+        startDate: "2030-06-01",
+        endDate: "2030-06-01",
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db(host), "trips/span-31"), {
+        ...newTrip(host),
+        startDate: "2030-01-01",
+        endDate: "2030-01-31",
+      }),
+    );
+    await assertSucceeds(
+      setDoc(doc(db(host), "trips/span-leap"), {
+        ...newTrip(host),
+        startDate: "2028-02-01",
+        endDate: "2028-03-01",
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db(host), "trips/span-leap-over"), {
+        ...newTrip(host),
+        startDate: "2028-02-01",
+        endDate: "2028-03-02",
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(db(leader), `trips/${tripId}`), {
+        endDate: "2030-02-01",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db(member), `trips/${tripId}`), {
+        startDate: "2029-12-01",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db(member), `trips/${tripId}`), {
+        endDate: "2030-01-30",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    const stretched = await assertSucceeds(getDoc(doc(db(member), `trips/${tripId}`)));
+    assert.equal(stretched.get("endDate"), "2030-01-30");
+  });
+
+  it("blocks other edits until a span over 30 inclusive days is shortened", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), `trips/${tripId}`), {
+        startDate: "2030-01-01",
+        endDate: "2030-02-15",
+      });
+    });
+    await assertFails(
+      updateDoc(doc(db(member), `trips/${tripId}`), {
+        title: "太長",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db(leader), `trips/${tripId}`), {
+        title: "太長",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db(leader), `trips/${tripId}`), {
+        endDate: "2030-01-30",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+});

@@ -22,7 +22,8 @@ void main() {
     expect(find.bySemanticsLabel(AppStrings.email), findsWidgets);
     expect(find.text(AppStrings.birthdayPurpose), findsOneWidget);
     expect(find.text(AppStrings.submitSignUp), findsOneWidget);
-    expect(find.byType(IconButton), findsNothing);
+    // DateTimeInputField adds a calendar icon button for the birthday field
+    expect(find.byType(IconButton), findsOneWidget);
 
     await enterLabeled(tester, AppStrings.email, 'kid@example.com');
     await enterLabeled(tester, AppStrings.password, 'password1');
