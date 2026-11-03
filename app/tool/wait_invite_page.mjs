@@ -1,10 +1,45 @@
-const deadline = Date.now() + 90000;
-const list = await fetch('http://127.0.0.1:9222/json').then((response) => response.json());
-const page = list.find((item) => item.type === 'page' && item.webSocketDebuggerUrl);
-if (!page) {
-  console.error('no chrome page', JSON.stringify(list));
+const debugUrl = 'http://127.0.0.1:9222/json';
+const connectBudgetMs = 60_000;
+const retryMs = 500;
+
+function describeFetchError(error) {
+  if (error && typeof error === 'object') {
+    const cause = 'cause' in error ? error.cause : undefined;
+    const code =
+      cause && typeof cause === 'object' && 'code' in cause ? String(cause.code) : '';
+    const message = 'message' in error ? String(error.message) : String(error);
+    return code ? `${code}: ${message}` : message;
+  }
+  return String(error);
+}
+
+async function waitForChromePage() {
+  const deadline = Date.now() + connectBudgetMs;
+  let lastError = 'Chrome DevTools did not respond';
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(debugUrl);
+      if (!response.ok) {
+        lastError = `HTTP ${response.status}`;
+      } else {
+        const list = await response.json();
+        const page = list.find((item) => item.type === 'page' && item.webSocketDebuggerUrl);
+        if (page) return page;
+        lastError = 'DevTools is up but no page target is ready yet';
+      }
+    } catch (error) {
+      lastError = describeFetchError(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, retryMs));
+  }
+  console.error(
+    `timed out after 60s waiting for Chrome DevTools at ${debugUrl}: ${lastError}`,
+  );
   process.exit(1);
 }
+
+const page = await waitForChromePage();
+const resultDeadline = Date.now() + 90_000;
 const socket = new WebSocket(page.webSocketDebuggerUrl);
 let id = 0;
 const pending = new Map();
@@ -24,7 +59,7 @@ function call(method, params) {
   });
 }
 await call('Runtime.enable', {});
-while (Date.now() < deadline) {
+while (Date.now() < resultDeadline) {
   const result = await call('Runtime.evaluate', {
     expression: 'document.title + "\\n" + document.body.innerText',
     returnByValue: true,
@@ -41,5 +76,5 @@ while (Date.now() < deadline) {
   }
   await new Promise((resolve) => setTimeout(resolve, 1000));
 }
-console.error('timed out');
+console.error('timed out after 90s waiting for the invite emulator page result');
 process.exit(1);

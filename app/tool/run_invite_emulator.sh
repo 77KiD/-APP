@@ -11,5 +11,24 @@ cleanup() {
   kill "$web_pid" "$chrome_pid" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-sleep 2
+
+python3 - <<'PY'
+import socket
+import sys
+import time
+
+deadline = time.monotonic() + 60
+while time.monotonic() < deadline:
+    try:
+        with socket.create_connection(("127.0.0.1", 9222), timeout=0.5):
+            sys.exit(0)
+    except OSError:
+        time.sleep(0.5)
+print(
+    "timed out after 60s waiting for Chrome to listen on 127.0.0.1:9222",
+    file=sys.stderr,
+)
+sys.exit(1)
+PY
+
 node "$root/app/tool/wait_invite_page.mjs"
