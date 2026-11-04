@@ -707,6 +707,85 @@ describe("change requests", () => {
     await assertSucceeds(approval.commit());
   });
 
+  for (const change of [
+    {
+      type: "expected_return_at",
+      key: "expectedReturnAt",
+      label: "預計回程時間",
+      proposed: Timestamp.fromDate(new Date("2091-01-02T00:00:00Z")),
+      different: Timestamp.fromDate(new Date("2091-01-03T00:00:00Z")),
+    },
+    {
+      type: "general_transport",
+      key: "generalTransport",
+      label: "一般交通方式",
+      proposed: "drive",
+      different: "walk",
+    },
+  ]) {
+    const createRequest = async () => {
+      await assertSucceeds(setDoc(doc(db(member), `trips/${tripId}/requests/matching-field`), {
+        type: change.type,
+        status: "pending",
+        proposerId: member,
+        payload: { [change.key]: change.proposed },
+        createdAt: serverTimestamp(),
+        expiresAt: null,
+        decidedBy: null,
+        decidedAt: null,
+      }));
+    };
+    const decision = (status: "approved" | "rejected") => ({
+      status,
+      decidedBy: leader,
+      decidedAt: serverTimestamp(),
+    });
+
+    it(`領隊同批次寫入不相符的${change.label}並核准會遭拒，申請維持待審`, async () => {
+      await createRequest();
+      const leaderDb = db(leader);
+      const request = doc(leaderDb, `trips/${tripId}/requests/matching-field`);
+      const trip = doc(leaderDb, `trips/${tripId}`);
+      const before = await assertSucceeds(getDoc(trip));
+      const batch = writeBatch(leaderDb);
+      batch.update(trip, { [change.key]: change.different, updatedAt: serverTimestamp() });
+      batch.update(request, decision("approved"));
+      await assertFails(batch.commit());
+      const pending = await assertSucceeds(getDoc(request));
+      assert.equal(pending.get("status"), "pending");
+      const unchanged = await assertSucceeds(getDoc(trip));
+      assert.deepEqual(unchanged.get(change.key), before.get(change.key));
+    });
+
+    it(`旅程${change.label}與申請不符時，領隊單獨核准會遭拒`, async () => {
+      await createRequest();
+      const request = doc(db(leader), `trips/${tripId}/requests/matching-field`);
+      await assertFails(updateDoc(request, decision("approved")));
+      const pending = await assertSucceeds(getDoc(request));
+      assert.equal(pending.get("status"), "pending");
+    });
+
+    it(`領隊先另行寫入相符的${change.label}後，可單獨核准申請`, async () => {
+      await createRequest();
+      await assertSucceeds(updateDoc(doc(db(leader), `trips/${tripId}`), {
+        [change.key]: change.proposed,
+        updatedAt: serverTimestamp(),
+      }));
+      const request = doc(db(leader), `trips/${tripId}/requests/matching-field`);
+      await assertSucceeds(updateDoc(request, decision("approved")));
+      const approved = await assertSucceeds(getDoc(request));
+      assert.equal(approved.get("status"), "approved");
+    });
+
+    it(`旅程${change.label}與申請不符時，領隊仍可單獨拒絕`, async () => {
+      await createRequest();
+      const request = doc(db(leader), `trips/${tripId}/requests/matching-field`);
+      await assertSucceeds(updateDoc(request, decision("rejected")));
+      const rejected = await assertSucceeds(getDoc(request));
+      assert.equal(rejected.get("status"), "rejected");
+    });
+  }
+
   it("領隊與副隊不得核准過期申請，但可拒絕同一筆申請", async () => {
     for (const uid of [leader, deputy]) {
       const requestPath = `trips/${tripId}/requests/expired-${uid}`;
@@ -739,6 +818,10 @@ describe("change requests", () => {
   });
 
   it("領隊與副隊可核准無期限或尚未到期的申請", async () => {
+    await assertSucceeds(updateDoc(doc(db(leader), `trips/${tripId}`), {
+      expectedReturnAt: Timestamp.fromDate(new Date("2091-01-02T00:00:00Z")),
+      updatedAt: serverTimestamp(),
+    }));
     for (const uid of [leader, deputy]) {
       for (const expiry of ["none", "future"]) {
         const requestPath = `trips/${tripId}/requests/${expiry}-${uid}`;

@@ -241,6 +241,95 @@ void main() {
     expect((await friendRepo.getTrip(trip.id)).expectedReturnAt, proposed);
   });
 
+  for (final expired in [false, true]) {
+    for (final queued in expired ? [false, true] : [true]) {
+      final name = expired
+          ? '處理過期申請只更新本機並拋出過期錯誤（已有排隊操作：$queued）'
+          : '離線核准已有舊申請操作時，旅程更新排在申請更新之前';
+      test(name, () async {
+        final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
+        final database = MemoryTripDatabase()..clock = clock.current;
+        final repo = _repo(
+          clock: clock,
+          database: database,
+          remote: MemoryTripRemote(
+            database: database,
+            currentUserId: () => 'host',
+          ),
+        );
+        final trip = await repo.createTrip(_form());
+        repo.connectivity.isOnline = false;
+        final request = ModificationRequest(
+          id: 'pending-request',
+          tripId: trip.id,
+          requesterId: 'friend',
+          requesterName: '成員',
+          type: ModificationType.expectedReturnTime,
+          proposedExpectedReturnAt: DateTime.utc(2026, 12, 3, 8),
+          status: RequestStatus.pending,
+          createdAt: clock.current.subtract(const Duration(hours: 2)),
+          expiresAt: expired
+              ? clock.current
+              : clock.current.add(const Duration(hours: 1)),
+        );
+        await repo.local.saveRequest(request);
+        if (queued) {
+          await repo.local.enqueue(
+            SyncOp(
+              type: SyncOpType.upsertRequest,
+              tripId: trip.id,
+              entityId: request.id,
+            ),
+          );
+        }
+
+        final resolving = repo.approveRequest(
+          tripId: trip.id,
+          requestId: request.id,
+        );
+        if (expired) {
+          await expectLater(
+            resolving,
+            throwsA(
+              isA<ValidationException>().having(
+                (error) => error.message,
+                'message',
+                AppStrings.requestExpired,
+              ),
+            ),
+          );
+          expect(await repo.local.readQueue(), isEmpty);
+          expect(
+            (await repo.local.readTrip(trip.id))!.expectedReturnAt,
+            isNull,
+          );
+        } else {
+          final updated = await resolving;
+          expect(updated.expectedReturnAt, request.proposedExpectedReturnAt);
+          final queue = await repo.local.readQueue();
+          expect(queue.map((op) => op.type), [
+            SyncOpType.upsertTrip,
+            SyncOpType.upsertRequest,
+          ]);
+          expect(queue.every((op) => op.tripId == trip.id), isTrue);
+          expect(queue.last.entityId, request.id);
+        }
+        expect(
+          (await repo.local.readRequests(trip.id)).single.status,
+          expired ? RequestStatus.expired : RequestStatus.approved,
+        );
+        expect(database.trips[trip.id]!.expectedReturnAt, isNull);
+        repo.connectivity.isOnline = true;
+        await repo.sync();
+        expect(await repo.local.readQueue(), isEmpty);
+        expect(
+          database.trips[trip.id]!.expectedReturnAt,
+          expired ? null : request.proposedExpectedReturnAt,
+        );
+      });
+    }
+  }
+
   test('6 人沒有副隊長時申請不過期，指定副隊長後角色會顯示', () async {
     final database = MemoryTripDatabase()
       ..clock = DateTime.utc(2026, 10, 26, 1);
