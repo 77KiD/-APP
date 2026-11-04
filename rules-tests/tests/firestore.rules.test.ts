@@ -996,12 +996,17 @@ describe("invite expiry and invitesOpen", () => {
   it("同一個 batch 改旅程名稱又發碼仍可成功", async () => {
     const leaderDb = db(leader);
     const batch = writeBatch(leaderDb);
+    // 真的改名。邀請碼帶舊名稱「京都自由行」：規則用 get() 讀 commit 前的 title。
     batch.update(doc(leaderDb, `trips/${tripId}`), {
-      title: "京都自由行",
+      title: "大阪自由行",
       updatedAt: serverTimestamp(),
     });
     batch.set(doc(leaderDb, "invites/BATCHOK01"), inviteDoc(leader));
     await assertSucceeds(batch.commit());
+    const trip = await assertSucceeds(getDoc(doc(leaderDb, `trips/${tripId}`)));
+    assert.equal(trip.get("title"), "大阪自由行");
+    const invite = await assertSucceeds(getDoc(doc(leaderDb, "invites/BATCHOK01")));
+    assert.equal(invite.get("tripTitle"), "京都自由行");
   });
 
   it("已結束行程不能補建隊長成員文件，未結束時可以", async () => {
