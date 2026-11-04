@@ -309,6 +309,17 @@ service cloud.firestore {
       );
     }
 
+    // payload has exactly one key, and that key is the trip field it changes
+    // (expectedReturnAt, generalTransport, returnTransport, returnFlight).
+    // getAfter() sees the trip after this commit: the same batch's trip write,
+    // or an earlier separate write (the app writes the trip first, then the
+    // request). Either way the approved value must already be on the trip.
+    function approvalWrittenToTrip(tripId, payload) {
+      let key = payload.keys()[0];
+      return payload.keys().size() == 1
+        && getAfter(tripPath(tripId)).data.get(key, null) == payload[key];
+    }
+
     function validRequestShape(data) {
       return data.keys().hasOnly([
         "type", "status", "proposerId", "payload", "createdAt", "expiresAt", "decidedBy", "decidedAt"
@@ -643,6 +654,12 @@ service cloud.firestore {
             request.resource.data.status == "rejected"
             || resource.data.expiresAt == null
             || request.time < resource.data.expiresAt
+          )
+          // "approved" must match what the trip actually holds after this write,
+          // so a request is never marked approved while the trip says otherwise.
+          && (
+            request.resource.data.status == "rejected"
+            || approvalWrittenToTrip(tripId, resource.data.payload)
           )
           && request.resource.data.decidedBy == request.auth.uid
           && request.resource.data.decidedAt == request.time
