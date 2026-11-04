@@ -451,7 +451,8 @@ class InvitePermissionException extends TripException {
 }
 
 class ServerWriteException extends TripException {
-  ServerWriteException() : super(AppStrings.serverWriteFailed);
+  ServerWriteException([String? message])
+    : super(message ?? AppStrings.serverWriteFailed);
 }
 
 class InviteExpiredException extends TripException {

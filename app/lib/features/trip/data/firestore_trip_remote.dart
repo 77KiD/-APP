@@ -185,7 +185,18 @@ class FirestoreTripRemote implements TripRemote {
           FirestoreSchema.decidedBy: null,
           FirestoreSchema.decidedAt: null,
         });
-        return;
+        // 離線時申請還沒上傳就被決定了：先建立 pending，再往下寫決定，
+        // 不能只建立 pending 就結束，否則核准或拒絕不會送到伺服器。
+        if (request.status == RequestStatus.pending) return;
+      } else {
+        // 本機仍是 pending 時沒有東西要更新；規則也不允許 pending 改成 pending。
+        if (request.status == RequestStatus.pending) return;
+        // 伺服器已經有人決定了（例如另一位副隊長），以伺服器為準。
+        // 再送一次決定一定會被拒，留在佇列只會卡住後面的同步。
+        if (existing.data()?[FirestoreSchema.status] !=
+            RequestStatus.pending.name) {
+          return;
+        }
       }
       await ref.update({
         FirestoreSchema.status: request.status.name,

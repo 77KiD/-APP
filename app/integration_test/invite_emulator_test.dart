@@ -85,6 +85,8 @@ class _InviteEmulatorAppState extends State<InviteEmulatorApp> {
       await _closedPublicInvite(authRepo);
       _setStatus('RUNNING skew');
       await _clockSkew(authRepo);
+      _setStatus('RUNNING request sync');
+      await _requestSync(authRepo);
       _setStatus('ALL PASS');
     } catch (error, stack) {
       _setStatus('FAIL $error\n$stack');
@@ -288,6 +290,82 @@ Future<void> _closedPublicInvite(FirebaseAuthRepository authRepo) async {
   _check(
     logs.join('\n').contains('code=unavailable'),
     '成員寫入要記下 unavailable，實際 ${logs.join(' | ')}',
+  );
+  await authRepo.signOut();
+}
+
+/// 修改申請的同步邊界：離線時還沒上傳就被決定、重送 pending、伺服器已有人決定。
+/// 這三種情況原本都會讓 upsertRequest 一直失敗或漏寫決定。
+Future<void> _requestSync(FirebaseAuthRepository authRepo) async {
+  final clock = FixedDeviceClock(DateTime.now().toUtc());
+  final leader = await _signUp(authRepo, '申請隊長');
+  final repo = _repository(authRepo, clock);
+  final trip = await repo.createTrip(_form('申請團'));
+  final remote = repo.remote;
+  final now = DateTime.now().toUtc();
+  final proposed = DateTime.fromMillisecondsSinceEpoch(
+    now.add(const Duration(days: 30)).millisecondsSinceEpoch,
+    isUtc: true,
+  );
+  // App 核准時先寫旅程，再寫申請。規則要求核准時旅程上已經是申請的值。
+  await remote.upsertTrip(
+    trip.copy(
+      setExpectedReturn: true,
+      expectedReturnAt: proposed,
+      updatedAt: now,
+    ),
+  );
+
+  ModificationRequest request(String id, RequestStatus status) {
+    final decided = status != RequestStatus.pending;
+    return ModificationRequest(
+      id: id,
+      tripId: trip.id,
+      requesterId: leader.id,
+      requesterName: leader.displayName,
+      type: ModificationType.expectedReturnTime,
+      proposedExpectedReturnAt: proposed,
+      status: status,
+      createdAt: now,
+      expiresAt: null,
+      resolvedAt: decided ? now : null,
+      resolvedBy: decided ? leader.id : null,
+    );
+  }
+
+  Future<String?> serverStatus(String id) async {
+    final snap = await FirebaseFirestore.instance
+        .collection(FirestorePaths.trips)
+        .doc(trip.id)
+        .collection(FirestorePaths.requests)
+        .doc(id)
+        .get(const GetOptions(source: Source.server));
+    return snap.data()?[FirestoreSchema.status] as String?;
+  }
+
+  // 1. 還沒上傳就被核准：要先建立 pending，再把核准寫上去。
+  await remote.upsertRequest(
+    request('offline-approve', RequestStatus.approved),
+  );
+  _check(
+    await serverStatus('offline-approve') == RequestStatus.approved.name,
+    '還沒上傳就核准的申請，伺服器上要是 approved',
+  );
+
+  // 2. 本機仍是 pending、伺服器已有文件：重送不能失敗。
+  await remote.upsertRequest(request('resend-pending', RequestStatus.pending));
+  await remote.upsertRequest(request('resend-pending', RequestStatus.pending));
+  _check(
+    await serverStatus('resend-pending') == RequestStatus.pending.name,
+    '重送 pending 後仍是 pending',
+  );
+
+  // 3. 伺服器已經拒絕，這台手機晚一步送核准：以伺服器為準，不能失敗。
+  await remote.upsertRequest(request('resend-pending', RequestStatus.rejected));
+  await remote.upsertRequest(request('resend-pending', RequestStatus.approved));
+  _check(
+    await serverStatus('resend-pending') == RequestStatus.rejected.name,
+    '伺服器已拒絕的申請要維持 rejected',
   );
   await authRepo.signOut();
 }

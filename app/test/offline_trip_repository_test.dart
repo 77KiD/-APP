@@ -241,6 +241,117 @@ void main() {
     expect((await friendRepo.getTrip(trip.id)).expectedReturnAt, proposed);
   });
 
+  for (final queuedTrip in [false, true]) {
+    test(
+      queuedTrip ? '線上核准旅程寫入被拒時，保留既有旅程編輯與排隊操作' : '線上核准旅程寫入被拒時，還原旅程與待處理申請並清除操作',
+      () async {
+        final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
+        final database = MemoryTripDatabase()..clock = clock.current;
+        final remote = _FailingApprovalRemote(
+          database: database,
+          currentUserId: () => 'host',
+        );
+        final repo = _repo(clock: clock, database: database, remote: remote);
+        final trip = await repo.createTrip(_form());
+        final original = queuedTrip
+            // 核准前已有一筆還沒同步的旅程編輯。
+            ? trip.copy(
+                setExpectedReturn: true,
+                expectedReturnAt: DateTime.utc(2026, 12, 2, 8),
+                updatedAt: clock.current.add(const Duration(minutes: 1)),
+              )
+            : trip;
+        final tripOp = SyncOp(type: SyncOpType.upsertTrip, tripId: trip.id);
+        if (queuedTrip) {
+          await repo.local.saveTrip(original);
+          await repo.local.enqueue(tripOp);
+        }
+        final request = _pendingApproval(trip.id, clock.current);
+        database.requests[trip.id] = {request.id: request};
+        remote.failTrips = true;
+        remote.writes.clear();
+
+        await expectLater(
+          repo.approveRequest(tripId: trip.id, requestId: request.id),
+          throwsA(
+            isA<ServerWriteException>().having(
+              (error) => error.message,
+              'message',
+              AppStrings.approveWriteFailed,
+            ),
+          ),
+        );
+
+        final restored = (await repo.local.readTrip(trip.id))!;
+        expect(restored.expectedReturnAt, original.expectedReturnAt);
+        expect(restored.updatedAt, original.updatedAt);
+        final pending = (await repo.local.readRequests(trip.id)).single;
+        expect(pending.status, RequestStatus.pending);
+        expect(pending.resolvedAt, isNull);
+        expect(pending.resolvedBy, isNull);
+        final queue = await repo.local.readQueue();
+        expect(
+          queue.where((op) => op.type == SyncOpType.upsertRequest),
+          isEmpty,
+        );
+        expect(queue.any((op) => op.sameAs(tripOp)), queuedTrip);
+        if (!queuedTrip) expect(queue, isEmpty);
+        expect(remote.writes, [SyncOpType.upsertTrip]);
+        expect(
+          database.trips[trip.id]!.expectedReturnAt,
+          trip.expectedReturnAt,
+        );
+        expect(
+          database.requests[trip.id]![request.id]!.status,
+          RequestStatus.pending,
+        );
+      },
+    );
+  }
+
+  test('線上核准成功時先寫入旅程再寫入申請，佇列清空', () async {
+    final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
+    final database = MemoryTripDatabase()..clock = clock.current;
+    final remote = _FailingApprovalRemote(
+      database: database,
+      currentUserId: () => 'host',
+    );
+    final repo = _repo(clock: clock, database: database, remote: remote);
+    final trip = await repo.createTrip(_form());
+    final request = _pendingApproval(trip.id, clock.current);
+    database.requests[trip.id] = {request.id: request};
+    await repo.local.saveRequest(request);
+    await repo.local.enqueue(
+      SyncOp(
+        type: SyncOpType.upsertRequest,
+        tripId: trip.id,
+        entityId: request.id,
+      ),
+    );
+    remote.writes.clear();
+
+    final approved = await repo.approveRequest(
+      tripId: trip.id,
+      requestId: request.id,
+    );
+
+    expect(approved.expectedReturnAt, request.proposedExpectedReturnAt);
+    expect(remote.writes, [SyncOpType.upsertTrip, SyncOpType.upsertRequest]);
+    expect(
+      database.trips[trip.id]!.expectedReturnAt,
+      request.proposedExpectedReturnAt,
+    );
+    expect(
+      database.requests[trip.id]![request.id]!.status,
+      RequestStatus.approved,
+    );
+    expect(
+      (await repo.local.readRequests(trip.id)).single.status,
+      RequestStatus.approved,
+    );
+    expect(await repo.local.readQueue(), isEmpty);
+  });
+
   for (final expired in [false, true]) {
     for (final queued in expired ? [false, true] : [true]) {
       final name = expired
@@ -885,6 +996,43 @@ OfflineTripRepository _repo({
     connectivity: ConnectivityProbe(isOnline: true),
     serverWriteTimeout: serverWriteTimeout,
   );
+}
+
+ModificationRequest _pendingApproval(String tripId, DateTime now) {
+  return ModificationRequest(
+    id: 'pending-request',
+    tripId: tripId,
+    requesterId: 'friend',
+    requesterName: '成員',
+    type: ModificationType.expectedReturnTime,
+    proposedExpectedReturnAt: DateTime.utc(2026, 12, 3, 8),
+    status: RequestStatus.pending,
+    createdAt: now,
+    expiresAt: now.add(const Duration(hours: 1)),
+  );
+}
+
+class _FailingApprovalRemote extends MemoryTripRemote {
+  _FailingApprovalRemote({
+    required super.database,
+    required super.currentUserId,
+  });
+
+  bool failTrips = false;
+  final writes = <SyncOpType>[];
+
+  @override
+  Future<void> upsertTrip(Trip trip) async {
+    writes.add(SyncOpType.upsertTrip);
+    if (failTrips) throw TripAccessDenied();
+    await super.upsertTrip(trip);
+  }
+
+  @override
+  Future<void> upsertRequest(ModificationRequest request) async {
+    writes.add(SyncOpType.upsertRequest);
+    await super.upsertRequest(request);
+  }
 }
 
 class _FailingInviteRemote extends MemoryTripRemote {

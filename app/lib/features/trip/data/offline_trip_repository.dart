@@ -336,14 +336,37 @@ class OfflineTripRepository implements TripRepository {
       expectedReturnAt: request.proposedExpectedReturnAt,
       updatedAt: now,
     );
+    final tripOp = SyncOp(type: SyncOpType.upsertTrip, tripId: tripId);
+    final requestOp = SyncOp(
+      type: SyncOpType.upsertRequest,
+      tripId: tripId,
+      entityId: request.id,
+    );
+    final hadTripOp = (await local.readQueue()).any((op) => op.sameAs(tripOp));
     await local.saveTrip(updated);
-    await local.enqueue(SyncOp(type: SyncOpType.upsertTrip, tripId: tripId));
+    await local.enqueue(tripOp);
     await _closeRequest(
       request: request,
       status: RequestStatus.approved,
       now: now,
       self: self,
     );
+    if (connectivity.isOnline) {
+      try {
+        await _pushNow([tripOp, requestOp]);
+      } on TripException {
+        await local.saveTrip(trip);
+        await local.saveRequest(request);
+        await local.removeOp(requestOp);
+        // 保留核准前已有的旅程變更，避免回復時丟掉其他離線編輯。
+        if (hadTripOp) {
+          await local.enqueue(tripOp);
+        } else {
+          await local.removeOp(tripOp);
+        }
+        throw ServerWriteException(AppStrings.approveWriteFailed);
+      }
+    }
     await _trySync();
     return (await local.readTrip(tripId))!;
   }
