@@ -431,6 +431,8 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && expiresOneServerHourFromNow(request.resource.data.expiresAt)
         && canIssueInvite(request.resource.data.tripId)
+        // An ended trip takes no new members, so it mints no new codes either.
+        && tripOpen(request.resource.data.tripId)
         && request.resource.data.tripTitle == get(tripPath(request.resource.data.tripId)).data.title;
 
       allow update: if isLeaderOrDeputy(resource.data.tripId)
@@ -451,9 +453,10 @@ service cloud.firestore {
 
     match /trips/{tripId} {
       allow list: if false;
-      // A missing trip has no resource. The app get()s before set(); that read
-      // must succeed with exists == false or the create never runs. || short-
-      // circuits, so resource.data is not read when the document is absent.
+      // A missing trip has no resource. The app now set()s first and only get()s
+      // after a denied create, but that read must still succeed with
+      // exists == false. || short-circuits, so resource.data is not read when
+      // the document is absent.
       // Any registered user may learn that a random id does not exist.
       allow get: if registered() && (
         !exists(tripPath(tripId))
@@ -574,6 +577,8 @@ service cloud.firestore {
               && get(tripPath(tripId)).data.leaderId == request.auth.uid
             ) || (
               request.resource.data.role == "member"
+              // Codes minted before the trip ended must not let anyone join after.
+              && tripOpen(tripId)
               && inviteGrants(request.resource.data.inviteCode, tripId)
             )
           );
@@ -625,6 +630,12 @@ service cloud.firestore {
           && validRequestShape(request.resource.data)
           && resource.data.status == "pending"
           && request.resource.data.status in ["approved", "rejected"]
+          // An expired request may still be rejected, but never approved.
+          && (
+            request.resource.data.status == "rejected"
+            || resource.data.expiresAt == null
+            || request.time < resource.data.expiresAt
+          )
           && request.resource.data.decidedBy == request.auth.uid
           && request.resource.data.decidedAt == request.time
           && request.resource.data.type == resource.data.type
