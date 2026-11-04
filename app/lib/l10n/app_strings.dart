@@ -42,6 +42,39 @@ abstract final class AppStrings {
   static const consentDecline = '先不要，全部關閉';
 
   static const myTrips = '我的旅程';
+  static String greeting(String name) => '嗨，$name';
+  static const settingsTitle = '個人設定';
+  static const statusPlanning = '規劃中';
+  static const statusActive = '旅途中';
+  static const statusEnded = '已結束';
+  static String tripDates(String start, String end) => '$start – $end';
+  // 決定看板（ADR 0011）
+  static const boardTitle = '決定看板';
+  static const boardDecided = '已決定';
+  static const boardPending = '待決定';
+  static const boardTodo = '我的待辦';
+  static const boardNothingToDo = '目前沒有你要處理的事';
+  static const boardDates = '日期';
+  static const boardMembers = '成員';
+  static String boardMemberCount(int count) => '$count 人';
+  static const boardUndecided = '尚未決定';
+  static const boardRequests = '修改申請';
+  static String boardRequestCount(int count) => '$count 筆等待隊長或副隊長審核';
+  static String boardReviewRequests(int count) => '審核 $count 筆修改申請';
+  static const boardAssignVice = '指定副隊長';
+  static const boardSetReturn = '設定預計回程時間';
+  static const boardSyncInvites = '同步邀請碼';
+  static const boardInviteFriends = '邀請朋友加入';
+  static const boardNoShareableInvite = '到旅程頁產生邀請碼，伺服器確認後就能分享';
+  static const boardShareInviteHint = '點這裡把邀請碼分享到 LINE';
+  static const boardShare = '分享看板到 LINE';
+  static const boardShareInvite = '分享邀請碼到 LINE';
+  static String boardShareTitle(String tripTitle) => '「$tripTitle」決定看板';
+  static String boardShareInviteLine(String code) =>
+      '還沒加入的人：打開 App，用邀請碼 $code 加入（1 小時內有效）。';
+  static String inviteShareText(String tripTitle, String code) =>
+      '一起去「$tripTitle」！打開 App，選「用邀請碼加入」，輸入 $code（1 小時內有效）。';
+  static const findComingSoon ='找人地圖在之後的版本推出。現在可以在旅程頁看成員與預計回程時間。';
   static const emptyTrips = '還沒有旅程。建立一趟旅程，或用邀請碼加入朋友的旅程。';
   static const createTrip = '建立旅程';
   static const joinTrip = '用邀請碼加入';

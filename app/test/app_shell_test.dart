@@ -17,20 +17,21 @@ void main() {
       expect(find.text('行程'), findsOneWidget);
       expect(find.text('找人'), findsOneWidget);
       expect(find.text('首頁'), findsNWidgets(2));
-      expect(find.text('聊天'), findsOneWidget);
+      expect(find.text('聊天'), findsNothing);
       expect(find.text('成員'), findsOneWidget);
     });
 
-    testWidgets('chat badge shows unread count',
+    testWidgets('聊天分頁已移除（ADR 0011）',
         (WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.light(),
-          home: const AppShell(chatUnreadCount: 3),
+          home: const AppShell(),
         ),
       );
 
-      expect(find.text('3'), findsOneWidget);
+      expect(BottomNavTab.values.map((tab) => tab.label), isNot(contains('聊天')));
+      expect(find.byIcon(Icons.chat_bubble_outline), findsNothing);
     });
 
     testWidgets('members badge shows approval count for leader',
@@ -69,7 +70,10 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.light(),
-          home: const AppShell(chatUnreadCount: 150),
+          home: const AppShell(
+            pendingApprovalsCount: 150,
+            isLeaderOrDeputy: true,
+          ),
         ),
       );
 
@@ -89,7 +93,8 @@ void main() {
             data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
             child: const AppShell(
               currentTrip: '東京自由行 2026',
-              chatUnreadCount: 99,
+              pendingApprovalsCount: 99,
+              isLeaderOrDeputy: true,
             ),
           ),
         ),
@@ -129,7 +134,7 @@ void main() {
           theme: AppTheme.light(),
           home: MediaQuery(
             data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
-            child: const AppShell(chatUnreadCount: 5),
+            child: const AppShell(),
           ),
         ),
       );
@@ -139,7 +144,7 @@ void main() {
       expect(find.text('行程'), findsOneWidget);
       expect(find.text('找人'), findsOneWidget);
       expect(find.text('首頁'), findsNWidgets(2));
-      expect(find.text('聊天'), findsOneWidget);
+      expect(find.text('聊天'), findsNothing);
       expect(find.text('成員'), findsOneWidget);
     });
   });
@@ -254,10 +259,10 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('聊天'));
+      await tester.tap(find.text('成員'));
       await tester.pumpAndSettle();
 
-      expect(find.text('聊天'), findsWidgets);
+      expect(find.text('成員'), findsWidgets);
     });
 
     testWidgets('home button has raised circular design',
@@ -278,6 +283,38 @@ void main() {
     });
   });
 
+  group('AppShell body and status', () {
+    testWidgets('bodyBuilder 提供分頁內容，回傳 null 時用預設畫面',
+        (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: AppShell(
+            bodyBuilder: (context, tab) =>
+                tab == BottomNavTab.home ? const Text('自訂首頁') : null,
+          ),
+        ),
+      );
+
+      expect(find.text('自訂首頁'), findsOneWidget);
+      await tester.tap(find.text('行程'));
+      await tester.pumpAndSettle();
+      expect(find.text('建立或加入旅程後，就能在這裡規劃行程'), findsOneWidget);
+    });
+
+    testWidgets('離線時右上角顯示離線', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: const AppShell(connectionStatus: ConnectionStatus.offline),
+        ),
+      );
+
+      expect(find.text('離線'), findsOneWidget);
+      expect(find.text('線上'), findsNothing);
+    });
+  });
+
   group('AppShell empty states', () {
     testWidgets('shows appropriate empty state for each tab',
         (WidgetTester tester) async {
@@ -295,10 +332,6 @@ void main() {
       await tester.tap(find.text('找人'));
       await tester.pumpAndSettle();
       expect(find.text('建立或加入旅程後，就能在地圖上看到夥伴的位置'), findsOneWidget);
-
-      await tester.tap(find.text('聊天'));
-      await tester.pumpAndSettle();
-      expect(find.text('建立或加入旅程後，就能和夥伴聊天'), findsOneWidget);
 
       await tester.tap(find.text('成員'));
       await tester.pumpAndSettle();
