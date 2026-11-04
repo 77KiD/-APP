@@ -6,6 +6,7 @@ import 'package:group_trip/app/app_scope.dart';
 import 'package:group_trip/core/ids/id_generator.dart';
 import 'package:group_trip/core/location/location_permission_gateway.dart';
 import 'package:group_trip/core/persistence/json_document_store.dart';
+import 'package:group_trip/core/share/share_gateway.dart';
 import 'package:group_trip/core/telemetry/telemetry.dart';
 import 'package:group_trip/core/theme/app_theme.dart';
 import 'package:group_trip/core/time/time_rules.dart';
@@ -66,9 +67,11 @@ class TestWorld {
       connectivity: connectivity,
       ids: SequentialIdGenerator(),
       firebaseConfigured: firebaseConfigured,
+      share: share,
     );
   }
 
+  final share = RecordingShareGateway();
   late final FixedDeviceClock clock;
   late final ConnectivityProbe connectivity;
   late final MemoryTripDatabase database;
