@@ -42,6 +42,6 @@ class SequentialIdGenerator implements IdGenerator {
   @override
   String inviteCode({int length = FirestoreSchema.inviteCodeMinLength}) {
     _n += 1;
-    return 'CODE${_n.toString().padLeft(2, '0')}';
+    return 'CODE${_n.toString().padLeft(length - 4, '0')}';
   }
 }

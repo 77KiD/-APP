@@ -12,6 +12,8 @@ class LabeledField extends StatelessWidget {
     this.textInputAction = TextInputAction.next,
     this.autofillHints,
     this.onSubmitted,
+    this.autocorrect = true,
+    this.enableSuggestions = true,
     super.key,
   });
 
@@ -24,6 +26,8 @@ class LabeledField extends StatelessWidget {
   final TextInputAction textInputAction;
   final Iterable<String>? autofillHints;
   final ValueChanged<String>? onSubmitted;
+  final bool autocorrect;
+  final bool enableSuggestions;
 
   @override
   Widget build(BuildContext context) {
@@ -33,8 +37,8 @@ class LabeledField extends StatelessWidget {
       keyboardType: keyboardType,
       textInputAction: textInputAction,
       autofillHints: autofillHints,
-      autocorrect: !obscure,
-      enableSuggestions: !obscure,
+      autocorrect: autocorrect && !obscure,
+      enableSuggestions: enableSuggestions && !obscure,
       onSubmitted: onSubmitted,
       decoration: InputDecoration(
         labelText: label,

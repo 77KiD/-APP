@@ -75,13 +75,18 @@ void main() {
       birthdayConsent: true,
       today: DateTime(2026, 10, 26),
     );
-    await tester.pumpWidget(wrapPage(world.deps, const LocationDisclosurePage()));
+    await tester.pumpWidget(
+      wrapPage(world.deps, const LocationDisclosurePage()),
+    );
     expect(find.text(AppStrings.disclosureBody), findsOneWidget);
     await tester.tap(find.text(AppStrings.disclosureAck));
     await tester.pumpAndSettle();
     expect(find.text(AppStrings.disclosureSaved), findsOneWidget);
     expect(world.permissionClient.calls, 0);
-    expect(await world.disclosure.isAcknowledged(world.auth.current!.id), isTrue);
+    expect(
+      await world.disclosure.isAcknowledged(world.auth.current!.id),
+      isTrue,
+    );
     expect(await world.deps.location.requestForSendLocation(), isFalse);
     expect(world.permissionClient.calls, 1);
   });
@@ -93,7 +98,7 @@ void main() {
     expect(find.text(AppStrings.inventoryBirthday), findsOneWidget);
   });
 
-  testWidgets('斷網仍可建立旅程並看到邀請碼與隊長', (tester) async {
+  testWidgets('斷網仍可建立旅程與隊長，但邀請碼尚未同步不能分享', (tester) async {
     tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -127,21 +132,26 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(AppStrings.roleCaptain), findsOneWidget);
-    expect(find.byKey(const Key('invite-code')), findsOneWidget);
-    expect(
-      find.text(AppStrings.inviteRemaining(const Duration(hours: 1))),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('invite-code')), findsNothing);
+    expect(find.text(AppStrings.invitePending), findsOneWidget);
     expect(find.text(AppStrings.inviteAdvisory), findsOneWidget);
     expect(
-      tester.widget<OutlinedButton>(find.byKey(const Key('issue-invite'))).onPressed,
+      tester
+          .widget<OutlinedButton>(find.byKey(const Key('issue-invite')))
+          .onPressed,
       isNotNull,
     );
-    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value, isTrue);
+    expect(
+      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      isTrue,
+    );
     await tester.ensureVisible(find.byType(SwitchListTile));
     await tester.tap(find.byType(SwitchListTile));
     await tester.pumpAndSettle();
-    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value, isFalse);
+    expect(
+      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      isFalse,
+    );
     expect((await world.trips.listMyTrips()).single.publicInvite, isFalse);
     expect(
       find.bySemanticsLabel(AppStrings.avatarLabel('小美'), skipOffstage: false),
@@ -194,7 +204,9 @@ void main() {
       );
     }
     world.connectivity.isOnline = false;
-    await tester.pumpWidget(wrapPage(world.deps, TripDetailPage(tripId: trip.id)));
+    await tester.pumpWidget(
+      wrapPage(world.deps, TripDetailPage(tripId: trip.id)),
+    );
     await tester.pumpAndSettle();
     // 本機模式說明會把名單往下推，清單是延遲建立的，先捲到最後一列。
     await tester.scrollUntilVisible(
@@ -202,14 +214,17 @@ void main() {
       200,
       scrollable: find.byType(Scrollable).first,
     );
-    expect(find.text(AppStrings.roleCaptain, skipOffstage: false), findsOneWidget);
-    expect(find.text(AppStrings.roleVice, skipOffstage: false), findsOneWidget);
-    expect(find.text(AppStrings.roleMember, skipOffstage: false), findsOneWidget);
     expect(
-      find.bySemanticsLabel(
-        AppStrings.avatarLabel('阿強'),
-        skipOffstage: false,
-      ),
+      find.text(AppStrings.roleCaptain, skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(find.text(AppStrings.roleVice, skipOffstage: false), findsOneWidget);
+    expect(
+      find.text(AppStrings.roleMember, skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel(AppStrings.avatarLabel('阿強'), skipOffstage: false),
       findsOneWidget,
     );
     expect(find.textContaining(AppStrings.inviteCode), findsWidgets);
@@ -259,13 +274,17 @@ void main() {
         joinedAt: world.clock.current,
       ),
     );
-    await tester.pumpWidget(wrapPage(world.deps, TripDetailPage(tripId: trip.id)));
+    await tester.pumpWidget(
+      wrapPage(world.deps, TripDetailPage(tripId: trip.id)),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(SwitchListTile), findsNothing);
     expect(find.text(AppStrings.inviteRestricted), findsOneWidget);
     expect(
-      tester.widget<OutlinedButton>(find.byKey(const Key('issue-invite'))).onPressed,
+      tester
+          .widget<OutlinedButton>(find.byKey(const Key('issue-invite')))
+          .onPressed,
       isNull,
     );
   });
@@ -312,7 +331,9 @@ void main() {
         joinedAt: world.clock.current,
       ),
     );
-    await tester.pumpWidget(wrapPage(world.deps, TripDetailPage(tripId: trip.id)));
+    await tester.pumpWidget(
+      wrapPage(world.deps, TripDetailPage(tripId: trip.id)),
+    );
     await tester.pumpAndSettle();
     expect(find.byType(SwitchListTile), findsOneWidget);
     await tester.ensureVisible(find.byType(SwitchListTile));

@@ -218,6 +218,7 @@ abstract final class TripCodec {
     final roleRaw =
         map[FirestoreSchema.creatorRole] ?? map[LocalOnlyFields.issuerRole];
     return InviteRecord(
+      serverConfirmed: map[LocalOnlyFields.inviteServerConfirmed] == true,
       code: code ?? _string(map[FirestoreSchema.inviteCode]),
       tripId: _string(map[FirestoreSchema.tripId]),
       createdBy: _string(map[FirestoreSchema.createdBy]),
@@ -294,7 +295,9 @@ abstract final class TripCodec {
       tripId: _string(map[FirestoreSchema.tripId]),
       date: _string(map[FirestoreSchema.date]),
       spots: _spotList(spots),
-      backupStops: hasBackups ? _spotList(map[FirestoreSchema.backupStops]) : null,
+      backupStops: hasBackups
+          ? _spotList(map[FirestoreSchema.backupStops])
+          : null,
       replaceBackupStops: map[LocalOnlyFields.replaceBackupStops] == true,
       updatedAt: _requiredInstant(
         map[FirestoreSchema.clientSavedAt] ?? map[FirestoreSchema.updatedAt],

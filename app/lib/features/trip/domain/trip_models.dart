@@ -390,6 +390,7 @@ class InviteRecord {
     this.issuerRole = MemberRole.captain,
     this.tripTitle = '',
     this.active = true,
+    this.serverConfirmed = false,
     required this.createdAt,
     required this.expiresAt,
   });
@@ -402,8 +403,23 @@ class InviteRecord {
   final MemberRole issuerRole;
   final String tripTitle;
   final bool active;
+
+  /// Local state only. Set after a server read, never merely after local enqueue.
+  final bool serverConfirmed;
   final DateTime createdAt;
   final DateTime expiresAt;
+
+  InviteRecord withServerConfirmation(bool confirmed) => InviteRecord(
+    code: code,
+    tripId: tripId,
+    createdBy: createdBy,
+    issuerRole: issuerRole,
+    tripTitle: tripTitle,
+    active: active,
+    createdAt: createdAt,
+    expiresAt: expiresAt,
+    serverConfirmed: confirmed,
+  );
 }
 
 enum SyncOpType {
