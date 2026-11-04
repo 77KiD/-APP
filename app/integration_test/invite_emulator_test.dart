@@ -295,7 +295,7 @@ Future<void> _closedPublicInvite(FirebaseAuthRepository authRepo) async {
 }
 
 /// 修改申請的同步邊界：離線時還沒上傳就被決定、重送 pending、伺服器已有人決定。
-/// 這三種情況原本都會讓 upsertRequest 一直失敗或漏寫決定。
+/// 核准一律走 approveRequest，旅程與申請同一個 batch 寫入。
 Future<void> _requestSync(FirebaseAuthRepository authRepo) async {
   final clock = FixedDeviceClock(DateTime.now().toUtc());
   final leader = await _signUp(authRepo, '申請隊長');
@@ -303,20 +303,16 @@ Future<void> _requestSync(FirebaseAuthRepository authRepo) async {
   final trip = await repo.createTrip(_form('申請團'));
   final remote = repo.remote;
   final now = DateTime.now().toUtc();
-  final proposed = DateTime.fromMillisecondsSinceEpoch(
-    now.add(const Duration(days: 30)).millisecondsSinceEpoch,
+  DateTime daysAhead(int days) => DateTime.fromMillisecondsSinceEpoch(
+    now.add(Duration(days: days)).millisecondsSinceEpoch,
     isUtc: true,
   );
-  // App 核准時先寫旅程，再寫申請。規則要求核准時旅程上已經是申請的值。
-  await remote.upsertTrip(
-    trip.copy(
-      setExpectedReturn: true,
-      expectedReturnAt: proposed,
-      updatedAt: now,
-    ),
-  );
 
-  ModificationRequest request(String id, RequestStatus status) {
+  ModificationRequest request(
+    String id,
+    RequestStatus status,
+    DateTime proposed,
+  ) {
     final decided = status != RequestStatus.pending;
     return ModificationRequest(
       id: id,
@@ -333,39 +329,74 @@ Future<void> _requestSync(FirebaseAuthRepository authRepo) async {
     );
   }
 
+  DocumentReference<Map<String, dynamic>> tripDoc() =>
+      FirebaseFirestore.instance.collection(FirestorePaths.trips).doc(trip.id);
+
   Future<String?> serverStatus(String id) async {
-    final snap = await FirebaseFirestore.instance
-        .collection(FirestorePaths.trips)
-        .doc(trip.id)
+    final snap = await tripDoc()
         .collection(FirestorePaths.requests)
         .doc(id)
         .get(const GetOptions(source: Source.server));
     return snap.data()?[FirestoreSchema.status] as String?;
   }
 
-  // 1. 還沒上傳就被核准：要先建立 pending，再把核准寫上去。
-  await remote.upsertRequest(
-    request('offline-approve', RequestStatus.approved),
+  Future<DateTime?> serverReturnAt() async {
+    final snap = await tripDoc().get(const GetOptions(source: Source.server));
+    final value = snap.data()?[FirestoreSchema.expectedReturnAt];
+    return value is Timestamp ? value.toDate().toUtc() : null;
+  }
+
+  // 1. 還沒上傳就被核准：先建立 pending，再用同一個 batch 寫旅程與核准，
+  //    規則的 getAfter 核對旅程上的值等於申請內容。
+  final first = daysAhead(30);
+  await remote.approveRequest(
+    request('offline-approve', RequestStatus.approved, first),
   );
   _check(
     await serverStatus('offline-approve') == RequestStatus.approved.name,
     '還沒上傳就核准的申請，伺服器上要是 approved',
   );
+  _check(
+    (await serverReturnAt())?.isAtSameMomentAs(first) ?? false,
+    '核准後伺服器旅程的預計回程時間要是申請的值',
+  );
 
   // 2. 本機仍是 pending、伺服器已有文件：重送不能失敗。
-  await remote.upsertRequest(request('resend-pending', RequestStatus.pending));
-  await remote.upsertRequest(request('resend-pending', RequestStatus.pending));
+  final second = daysAhead(31);
+  await remote.upsertRequest(
+    request('resend-pending', RequestStatus.pending, second),
+  );
+  await remote.upsertRequest(
+    request('resend-pending', RequestStatus.pending, second),
+  );
   _check(
     await serverStatus('resend-pending') == RequestStatus.pending.name,
     '重送 pending 後仍是 pending',
   );
 
-  // 3. 伺服器已經拒絕，這台手機晚一步送核准：以伺服器為準，不能失敗。
-  await remote.upsertRequest(request('resend-pending', RequestStatus.rejected));
-  await remote.upsertRequest(request('resend-pending', RequestStatus.approved));
+  // 3. 伺服器已經拒絕，這台手機晚一步核准：丟出已處理，伺服器旅程不變。
+  await remote.upsertRequest(
+    request('resend-pending', RequestStatus.rejected, second),
+  );
+  try {
+    await remote.approveRequest(
+      request('resend-pending', RequestStatus.approved, second),
+    );
+    throw StateError('伺服器已拒絕的申請不該核准成功');
+  } on RequestHandledException {
+    // 預期。
+  }
   _check(
     await serverStatus('resend-pending') == RequestStatus.rejected.name,
     '伺服器已拒絕的申請要維持 rejected',
+  );
+  _check(
+    (await serverReturnAt())?.isAtSameMomentAs(first) ?? false,
+    '晚一步的核准不能改動伺服器旅程',
+  );
+  // 同步路徑（upsertRequest 帶 approved）遇到已決定的申請也不能卡住。
+  await remote.upsertRequest(
+    request('resend-pending', RequestStatus.approved, second),
   );
   await authRepo.signOut();
 }

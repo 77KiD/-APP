@@ -241,9 +241,13 @@ void main() {
     expect((await friendRepo.getTrip(trip.id)).expectedReturnAt, proposed);
   });
 
-  for (final queuedTrip in [false, true]) {
+  // Codex 審核 d5ea1ff 的 P1／P2：核准要一次寫完，失敗時伺服器不能只寫一半，
+  // 也不能弄丟核准前就在佇列裡的申請項目。
+  for (final queuedRequest in [false, true]) {
     test(
-      queuedTrip ? '線上核准旅程寫入被拒時，保留既有旅程編輯與排隊操作' : '線上核准旅程寫入被拒時，還原旅程與待處理申請並清除操作',
+      queuedRequest
+          ? '線上核准失敗時，保留核准前已排隊的申請項目，之後仍能上傳'
+          : '線上核准失敗時，伺服器旅程與申請都不變，本機還原',
       () async {
         final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
         final database = MemoryTripDatabase()..clock = clock.current;
@@ -253,22 +257,20 @@ void main() {
         );
         final repo = _repo(clock: clock, database: database, remote: remote);
         final trip = await repo.createTrip(_form());
-        final original = queuedTrip
-            // 核准前已有一筆還沒同步的旅程編輯。
-            ? trip.copy(
-                setExpectedReturn: true,
-                expectedReturnAt: DateTime.utc(2026, 12, 2, 8),
-                updatedAt: clock.current.add(const Duration(minutes: 1)),
-              )
-            : trip;
-        final tripOp = SyncOp(type: SyncOpType.upsertTrip, tripId: trip.id);
-        if (queuedTrip) {
-          await repo.local.saveTrip(original);
-          await repo.local.enqueue(tripOp);
-        }
         final request = _pendingApproval(trip.id, clock.current);
-        database.requests[trip.id] = {request.id: request};
-        remote.failTrips = true;
+        final requestOp = SyncOp(
+          type: SyncOpType.upsertRequest,
+          tripId: trip.id,
+          entityId: request.id,
+        );
+        if (queuedRequest) {
+          // 申請只在這台手機上，還沒上傳。
+          await repo.local.saveRequest(request);
+          await repo.local.enqueue(requestOp);
+        } else {
+          database.requests[trip.id] = {request.id: request};
+        }
+        remote.failApprovals = true;
         remote.writes.clear();
 
         await expectLater(
@@ -282,34 +284,42 @@ void main() {
           ),
         );
 
-        final restored = (await repo.local.readTrip(trip.id))!;
-        expect(restored.expectedReturnAt, original.expectedReturnAt);
-        expect(restored.updatedAt, original.updatedAt);
+        // P1：伺服器全部沒寫入。
+        expect(remote.writes, ['approve']);
+        expect(database.trips[trip.id]!.expectedReturnAt, isNull);
+        expect(
+          database.requests[trip.id]?[request.id]?.status,
+          queuedRequest ? isNull : RequestStatus.pending,
+        );
+        // 本機回到核准前。
+        expect(
+          (await repo.local.readTrip(trip.id))!.expectedReturnAt,
+          trip.expectedReturnAt,
+        );
         final pending = (await repo.local.readRequests(trip.id)).single;
         expect(pending.status, RequestStatus.pending);
         expect(pending.resolvedAt, isNull);
         expect(pending.resolvedBy, isNull);
+        // P2：核准前已排隊的申請項目要留著。
         final queue = await repo.local.readQueue();
-        expect(
-          queue.where((op) => op.type == SyncOpType.upsertRequest),
-          isEmpty,
-        );
-        expect(queue.any((op) => op.sameAs(tripOp)), queuedTrip);
-        if (!queuedTrip) expect(queue, isEmpty);
-        expect(remote.writes, [SyncOpType.upsertTrip]);
-        expect(
-          database.trips[trip.id]!.expectedReturnAt,
-          trip.expectedReturnAt,
-        );
-        expect(
-          database.requests[trip.id]![request.id]!.status,
-          RequestStatus.pending,
-        );
+        expect(queue.any((op) => op.sameAs(requestOp)), queuedRequest);
+        expect(queue.where((op) => op.type == SyncOpType.upsertTrip), isEmpty);
+
+        if (queuedRequest) {
+          remote.failApprovals = false;
+          await repo.sync();
+          expect(
+            database.requests[trip.id]![request.id]!.status,
+            RequestStatus.pending,
+            reason: '原本的 pending 申請恢復連線後仍要上傳',
+          );
+          expect(await repo.local.readQueue(), isEmpty);
+        }
       },
     );
   }
 
-  test('線上核准成功時先寫入旅程再寫入申請，佇列清空', () async {
+  test('線上核准成功時旅程與申請一起寫入，佇列清空', () async {
     final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
     final database = MemoryTripDatabase()..clock = clock.current;
     final remote = _FailingApprovalRemote(
@@ -320,14 +330,6 @@ void main() {
     final trip = await repo.createTrip(_form());
     final request = _pendingApproval(trip.id, clock.current);
     database.requests[trip.id] = {request.id: request};
-    await repo.local.saveRequest(request);
-    await repo.local.enqueue(
-      SyncOp(
-        type: SyncOpType.upsertRequest,
-        tripId: trip.id,
-        entityId: request.id,
-      ),
-    );
     remote.writes.clear();
 
     final approved = await repo.approveRequest(
@@ -336,27 +338,80 @@ void main() {
     );
 
     expect(approved.expectedReturnAt, request.proposedExpectedReturnAt);
-    expect(remote.writes, [SyncOpType.upsertTrip, SyncOpType.upsertRequest]);
+    expect(remote.writes, ['approve']);
     expect(
       database.trips[trip.id]!.expectedReturnAt,
       request.proposedExpectedReturnAt,
     );
+    final saved = database.requests[trip.id]![request.id]!;
+    expect(saved.status, RequestStatus.approved);
+    expect(saved.resolvedBy, 'host');
+    expect(await repo.local.readQueue(), isEmpty);
+  });
+
+  test('伺服器上已有人拒絕時，核准失敗且伺服器旅程不變', () async {
+    final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
+    final database = MemoryTripDatabase()..clock = clock.current;
+    final remote = _FailingApprovalRemote(
+      database: database,
+      currentUserId: () => 'host',
+    );
+    final repo = _repo(clock: clock, database: database, remote: remote);
+    final trip = await repo.createTrip(_form());
+    final request = _pendingApproval(trip.id, clock.current);
+    // 這台手機還以為是 pending（佇列裡有它的項目，所以不會先重抓），
+    // 伺服器上另一位副隊長已經拒絕了。
+    final requestOp = SyncOp(
+      type: SyncOpType.upsertRequest,
+      tripId: trip.id,
+      entityId: request.id,
+    );
+    await repo.local.saveRequest(request);
+    await repo.local.enqueue(requestOp);
+    database.requests[trip.id] = {
+      request.id: request.copy(
+        status: RequestStatus.rejected,
+        resolvedAt: clock.current,
+        resolvedBy: 'deputy',
+      ),
+    };
+    await expectLater(
+      repo.approveRequest(tripId: trip.id, requestId: request.id),
+      throwsA(
+        isA<RequestHandledException>().having(
+          (error) => error.message,
+          'message',
+          AppStrings.requestHandled,
+        ),
+      ),
+    );
+    expect(database.trips[trip.id]!.expectedReturnAt, isNull);
     expect(
       database.requests[trip.id]![request.id]!.status,
-      RequestStatus.approved,
+      RequestStatus.rejected,
     );
     expect(
-      (await repo.local.readRequests(trip.id)).single.status,
-      RequestStatus.approved,
+      (await repo.local.readTrip(trip.id))!.expectedReturnAt,
+      trip.expectedReturnAt,
+    );
+    // 之後同步不能用 pending 蓋掉伺服器的決定，也不能卡住佇列。
+    await repo.sync();
+    expect(
+      database.requests[trip.id]![request.id]!.status,
+      RequestStatus.rejected,
     );
     expect(await repo.local.readQueue(), isEmpty);
+    expect(
+      (await repo.local.readRequests(trip.id)).single.status,
+      RequestStatus.rejected,
+    );
   });
 
   for (final expired in [false, true]) {
     for (final queued in expired ? [false, true] : [true]) {
       final name = expired
           ? '處理過期申請只更新本機並拋出過期錯誤（已有排隊操作：$queued）'
-          : '離線核准已有舊申請操作時，旅程更新排在申請更新之前';
+          : '離線核准時只排一筆申請項目，連線後旅程與申請一起寫入';
       test(name, () async {
         final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
         final database = MemoryTripDatabase()..clock = clock.current;
@@ -418,10 +473,8 @@ void main() {
           final updated = await resolving;
           expect(updated.expectedReturnAt, request.proposedExpectedReturnAt);
           final queue = await repo.local.readQueue();
-          expect(queue.map((op) => op.type), [
-            SyncOpType.upsertTrip,
-            SyncOpType.upsertRequest,
-          ]);
+          // 核准只排一筆申請項目；送出時旅程與申請在同一個 batch 寫入。
+          expect(queue.map((op) => op.type), [SyncOpType.upsertRequest]);
           expect(queue.every((op) => op.tripId == trip.id), isTrue);
           expect(queue.last.entityId, request.id);
         }
@@ -1018,20 +1071,27 @@ class _FailingApprovalRemote extends MemoryTripRemote {
     required super.currentUserId,
   });
 
-  bool failTrips = false;
-  final writes = <SyncOpType>[];
+  /// 模擬 Firestore 拒絕整個核准 batch：旅程與申請都不會寫入。
+  bool failApprovals = false;
+  final writes = <String>[];
 
   @override
   Future<void> upsertTrip(Trip trip) async {
-    writes.add(SyncOpType.upsertTrip);
-    if (failTrips) throw TripAccessDenied();
+    writes.add('upsertTrip');
     await super.upsertTrip(trip);
   }
 
   @override
   Future<void> upsertRequest(ModificationRequest request) async {
-    writes.add(SyncOpType.upsertRequest);
+    writes.add('upsertRequest');
     await super.upsertRequest(request);
+  }
+
+  @override
+  Future<void> approveRequest(ModificationRequest request) async {
+    writes.add('approve');
+    if (failApprovals) throw TripAccessDenied();
+    await super.approveRequest(request);
   }
 }
 
