@@ -6,14 +6,17 @@ import 'package:group_trip/features/trip/presentation/trip_detail_page.dart';
 import 'package:group_trip/l10n/app_strings.dart';
 
 class JoinTripPage extends StatefulWidget {
-  const JoinTripPage({super.key});
+  const JoinTripPage({this.initialCode, super.key});
+
+  /// 從邀請連結 `/j/<邀請碼>` 打開時先填好（ADR 0012 第 3 點）。
+  final String? initialCode;
 
   @override
   State<JoinTripPage> createState() => _JoinTripPageState();
 }
 
 class _JoinTripPageState extends State<JoinTripPage> {
-  final _code = TextEditingController();
+  late final _code = TextEditingController(text: widget.initialCode ?? '');
   String? _error;
   bool _busy = false;
 

@@ -74,7 +74,17 @@ abstract final class AppStrings {
       '還沒加入的人：打開 App，用邀請碼 $code 加入（1 小時內有效）。';
   static String inviteShareText(String tripTitle, String code) =>
       '一起去「$tripTitle」！打開 App，選「用邀請碼加入」，輸入 $code（1 小時內有效）。';
-  static const findComingSoon ='找人地圖在之後的版本推出。現在可以在旅程頁看成員與預計回程時間。';
+  // 網頁版（ADR 0012）
+  static const guestTitle = '用網頁加入旅程';
+  static const guestIntro =
+      '不用安裝 App，填名稱與生日就能看行程與投票。這個帳號只存在這個瀏覽器；清掉瀏覽器資料就找不回來，要長期保留請下載 App。';
+  static const submitGuest = '開始使用';
+  static const guestHasAccount = '已經有帳號，用 email 登入';
+  static const webCreateInApp = '建立旅程請使用 App。網頁版可以加入旅程、看行程與投票。';
+  static const webFindInApp = '找人需要手機的定位，請使用 App。';
+  static String inviteLinkLine(String url) => '網頁直接加入：$url';
+  static const findComingSoon =
+      '找人地圖在之後的版本推出。現在可以在旅程頁看成員與預計回程時間。';
   static const emptyTrips = '還沒有旅程。建立一趟旅程，或用邀請碼加入朋友的旅程。';
   static const createTrip = '建立旅程';
   static const joinTrip = '用邀請碼加入';

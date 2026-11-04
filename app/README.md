@@ -41,6 +41,25 @@ flutter test
 
 `firebase.local.json`、`google-services.json`、`artifacts/` 與 `*.apk` 都在 `.gitignore`，不要提交。
 
+## 網頁版（ADR 0012）
+
+iPhone 成員可以不安裝 App，用邀請連結 `https://<專案>.web.app/j/<邀請碼>` 在網頁加入。網頁版只做看行程、投票、填資料卡、看帳；建立旅程與找人要用 App。網頁訪客用匿名帳號加顯示名稱與生日註冊，13 歲門檻與規則照常檢查。
+
+第一次啟用前，在 Firebase 主控台：
+
+1. **Authentication → 登入方式**：啟用「匿名」。
+2. **專案設定 → 一般**：新增「網頁應用程式」，把它的 App ID 填進 `firebase.local.json` 的 `FIREBASE_WEB_APP_ID`（和 Android 的 `FIREBASE_APP_ID` 不同）。
+
+建置與部署（在 `app/`）：
+
+```powershell
+flutter build web --release --dart-define-from-file=firebase.local.json
+cd ..
+npx firebase deploy --only hosting
+```
+
+網頁版的資料存在瀏覽器的 localStorage；清掉瀏覽器資料就找不回訪客帳號。網站隱私權政策與 cookie 說明要在上線前完成並由律師審閱（ADR 0012 第 7 點）。
+
 ## Windows 開發環境
 
 將 Flutter SDK 的 `bin` 目錄加入 PATH，並重新開啟終端機。尚未設定 PATH 時，

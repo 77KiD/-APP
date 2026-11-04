@@ -45,6 +45,7 @@ class DecisionBoard {
     required this.order,
     required this.items,
     this.shareableInvite,
+    this.inviteUrlFor,
   });
 
   final Trip trip;
@@ -55,6 +56,9 @@ class DecisionBoard {
 
   /// 伺服器已確認、還在效期內、可以分享的邀請碼。
   final InviteRecord? shareableInvite;
+
+  /// 有網頁版時，邀請碼的網址（ADR 0012 第 3 點）；本機模式為 null。
+  final String? Function(String code)? inviteUrlFor;
 
   List<BoardItem> section(BoardSection section) => [
     for (final item in items)
@@ -83,6 +87,7 @@ class DecisionBoard {
     required List<ModificationRequest> requests,
     required List<InviteRecord> invites,
     required DateTime now,
+    String? Function(String code)? inviteUrlFor,
   }) {
     final items = <BoardItem>[];
     final role = self?.role ?? MemberRole.member;
@@ -205,6 +210,7 @@ class DecisionBoard {
       order: orderFor(trip.status),
       items: items,
       shareableInvite: shareable,
+      inviteUrlFor: inviteUrlFor,
     );
   }
 
@@ -252,11 +258,21 @@ class DecisionBoard {
         ..writeln()
         ..writeln()
         ..write(AppStrings.boardShareInviteLine(invite.code));
+      final url = inviteUrlFor?.call(invite.code);
+      if (url != null) {
+        buffer
+          ..writeln()
+          ..write(AppStrings.inviteLinkLine(url));
+      }
     }
     return buffer.toString();
   }
 
   /// 只分享邀請碼時的文字。
-  static String inviteShareText(Trip trip, InviteRecord invite) =>
-      AppStrings.inviteShareText(trip.title, invite.code);
+  String inviteShareText(InviteRecord invite) {
+    final text = AppStrings.inviteShareText(trip.title, invite.code);
+    final url = inviteUrlFor?.call(invite.code);
+    if (url == null) return text;
+    return '$text\n${AppStrings.inviteLinkLine(url)}';
+  }
 }

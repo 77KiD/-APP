@@ -2,12 +2,15 @@ import 'dart:io';
 
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter/foundation.dart';
 import 'package:group_trip/app/app_dependencies.dart';
 import 'package:group_trip/core/firebase/firebase_config.dart';
 import 'package:group_trip/core/firebase/firebase_initializer.dart';
 import 'package:group_trip/core/ids/id_generator.dart';
 import 'package:group_trip/core/location/location_permission_gateway.dart';
+import 'package:group_trip/core/persistence/browser_storage.dart';
 import 'package:group_trip/core/persistence/json_document_store.dart';
+import 'package:group_trip/core/persistence/key_value_document_store.dart';
 import 'package:group_trip/core/telemetry/telemetry.dart';
 import 'package:group_trip/core/time/device_sources.dart';
 import 'package:group_trip/features/auth/data/firebase_auth_repository.dart';
@@ -18,13 +21,24 @@ import 'package:group_trip/features/trip/data/firestore_trip_remote.dart';
 import 'package:group_trip/features/trip/data/memory_trip_remote.dart';
 import 'package:group_trip/features/trip/data/offline_trip_repository.dart';
 import 'package:group_trip/features/trip/data/trip_local_store.dart';
+import 'package:group_trip/features/trip/domain/invite_link.dart';
 import 'package:path_provider/path_provider.dart';
 
 Future<AppDependencies> buildAppDependencies() async {
   final configured = FirebaseConfig.isConfigured;
   if (configured) await initializeConfiguredFirebase();
 
-  final directory = await getApplicationSupportDirectory();
+  // 網頁沒有檔案系統，改存在瀏覽器的 localStorage（ADR 0012）。
+  final String? directoryPath = kIsWeb
+      ? null
+      : (await getApplicationSupportDirectory()).path;
+  JsonDocumentStore storeFor(String name) => directoryPath == null
+      ? KeyValueDocumentStore(
+          key: 'group_trip/$name',
+          readString: browserStorageRead,
+          writeString: browserStorageWrite,
+        )
+      : FileDocumentStore(File('$directoryPath/$name'));
   final ids = RandomIdGenerator();
   final clock = AndroidElapsedClock();
   final connectivity = PluginConnectivityProbe();
@@ -32,13 +46,13 @@ Future<AppDependencies> buildAppDependencies() async {
   final AuthRepository auth;
   if (configured) {
     final firebaseAuth = FirebaseAuthRepository(
-      consentStore: FileDocumentStore(File('${directory.path}/consent.json')),
+      consentStore: storeFor('consent.json'),
     );
     await firebaseAuth.restore();
     auth = firebaseAuth;
   } else {
     final localAuth = LocalAuthRepository(
-      store: FileDocumentStore(File('${directory.path}/auth.json')),
+      store: storeFor('auth.json'),
       ids: ids,
     );
     await localAuth.restore();
@@ -46,9 +60,7 @@ Future<AppDependencies> buildAppDependencies() async {
   }
 
   final trips = OfflineTripRepository(
-    local: TripLocalStore(
-      FileDocumentStore(File('${directory.path}/trips.json')),
-    ),
+    local: TripLocalStore(storeFor('trips.json')),
     remote: configured
         ? FirestoreTripRemote(currentUserId: () => auth.current?.id ?? '')
         : MemoryTripRemote(
@@ -60,14 +72,13 @@ Future<AppDependencies> buildAppDependencies() async {
     ids: ids,
     connectivity: connectivity,
   );
-  final disclosure = DisclosureStore(
-    FileDocumentStore(File('${directory.path}/disclosure.json')),
-  );
+  final disclosure = DisclosureStore(storeFor('disclosure.json'));
   final telemetry = Telemetry(
     analytics: configured
         ? const FirebaseAnalyticsClient()
         : RecordingAnalyticsClient(),
-    crashes: configured
+    // Crashlytics 不支援網頁。
+    crashes: configured && !kIsWeb
         ? const FirebaseCrashReporterClient()
         : RecordingCrashReporter(),
   );
@@ -97,6 +108,8 @@ Future<AppDependencies> buildAppDependencies() async {
     connectivity: connectivity,
     ids: ids,
     firebaseConfigured: configured,
+    isWeb: kIsWeb,
+    initialInviteCode: kIsWeb ? InviteLink.parse(browserLocation()) : null,
   );
 }
 
@@ -122,7 +135,9 @@ class FirebaseCrashReporterClient implements CrashReporter {
 
   @override
   Future<void> setCollectionEnabled(bool enabled) {
-    return FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(enabled);
+    return FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
+      enabled,
+    );
   }
 
   @override

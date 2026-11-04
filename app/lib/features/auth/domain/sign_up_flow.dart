@@ -44,6 +44,36 @@ class SignUpFlow {
     }
   }
 
+  /// 網頁訪客：不需要 email 與密碼，其餘規則與一般註冊相同。
+  Future<SignUpOutcome> runGuest({
+    required String displayName,
+    required String birthday,
+    required bool birthdayConsent,
+    required DateTime today,
+  }) async {
+    final failure = validateProfile(
+      displayName: displayName,
+      birthday: birthday,
+      birthdayConsent: birthdayConsent,
+      today: today,
+    );
+    if (failure != null) return SignUpOutcome.failure(failure);
+    try {
+      final account = await create(
+        AcceptedSignUp(
+          email: '',
+          password: '',
+          displayName: displayName.trim(),
+          birthday: birthday.trim(),
+          today: today,
+        ),
+      );
+      return SignUpOutcome.success(account);
+    } on ProfileWriteFailure catch (failure) {
+      return SignUpOutcome.failure(failure);
+    }
+  }
+
   static SignUpFailure? validate({
     required String email,
     required String password,
@@ -56,6 +86,21 @@ class SignUpFlow {
       return const InvalidEmailFailure();
     }
     if (password.length < 8) return const WeakPasswordFailure();
+    return validateProfile(
+      displayName: displayName,
+      birthday: birthday,
+      birthdayConsent: birthdayConsent,
+      today: today,
+    );
+  }
+
+  /// 顯示名稱、生日、13 歲門檻與生日用途同意。一般註冊與網頁訪客共用。
+  static SignUpFailure? validateProfile({
+    required String displayName,
+    required String birthday,
+    required bool birthdayConsent,
+    required DateTime today,
+  }) {
     final name = displayName.trim();
     if (name.isEmpty) {
       return const InvalidDisplayNameFailure(AppStrings.emptyName);
