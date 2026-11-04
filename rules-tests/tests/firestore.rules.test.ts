@@ -707,6 +707,60 @@ describe("change requests", () => {
     await assertSucceeds(approval.commit());
   });
 
+  it("領隊與副隊不得核准過期申請，但可拒絕同一筆申請", async () => {
+    for (const uid of [leader, deputy]) {
+      const requestPath = `trips/${tripId}/requests/expired-${uid}`;
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), requestPath), {
+          type: "expected_return_at",
+          status: "pending",
+          proposerId: member,
+          payload: { expectedReturnAt: Timestamp.fromDate(new Date("2091-01-02T00:00:00Z")) },
+          createdAt: Timestamp.fromMillis(Date.now() - 30 * 60 * 1000),
+          expiresAt: Timestamp.fromMillis(Date.now() - 5 * 60 * 1000),
+          decidedBy: null,
+          decidedAt: null,
+        });
+      });
+      const request = doc(db(uid), requestPath);
+      await assertFails(updateDoc(request, {
+        status: "approved",
+        decidedBy: uid,
+        decidedAt: serverTimestamp(),
+      }));
+      const pending = await assertSucceeds(getDoc(request));
+      assert.equal(pending.get("status"), "pending");
+      await assertSucceeds(updateDoc(request, {
+        status: "rejected",
+        decidedBy: uid,
+        decidedAt: serverTimestamp(),
+      }));
+    }
+  });
+
+  it("領隊與副隊可核准無期限或尚未到期的申請", async () => {
+    for (const uid of [leader, deputy]) {
+      for (const expiry of ["none", "future"]) {
+        const requestPath = `trips/${tripId}/requests/${expiry}-${uid}`;
+        await assertSucceeds(setDoc(doc(db(member), requestPath), {
+          type: "expected_return_at",
+          status: "pending",
+          proposerId: member,
+          payload: { expectedReturnAt: Timestamp.fromDate(new Date("2091-01-02T00:00:00Z")) },
+          createdAt: serverTimestamp(),
+          expiresAt: expiry === "none" ? null : Timestamp.fromMillis(Date.now() + 15 * 60 * 1000),
+          decidedBy: null,
+          decidedAt: null,
+        }));
+        await assertSucceeds(updateDoc(doc(db(uid), requestPath), {
+          status: "approved",
+          decidedBy: uid,
+          decidedAt: serverTimestamp(),
+        }));
+      }
+    }
+  });
+
   it("rolls back approval when the proposed 預計回程時間 is already past", async () => {
     await assertSucceeds(
       setDoc(doc(db(member), `trips/${tripId}/requests/req-past`), {
@@ -913,6 +967,48 @@ describe("invite expiry and invitesOpen", () => {
     const tooSoon = Timestamp.fromMillis(Date.now() + 30 * 60 * 1000);
     await assertFails(setDoc(doc(db(member), "invites/TOOLATE01"), inviteDoc(member, tooLate)));
     await assertFails(setDoc(doc(db(member), "invites/TOOSOON01"), inviteDoc(member, tooSoon)));
+  });
+
+  it("已結束行程即使開放邀請也不得建立邀請碼", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), `trips/${tripId}`), {
+        status: "ended",
+        endedAt: serverTimestamp(),
+        endReason: "leader_manual",
+        invitesOpen: true,
+      });
+    });
+    // 代碼必須符合 ^[A-Za-z0-9]{8,12}$，否則會因格式被拒，測不到 tripOpen。
+    for (const [index, uid] of [leader, deputy, member].entries()) {
+      await assertFails(setDoc(doc(db(uid), `invites/ENDEDCD${index}`), inviteDoc(uid)));
+    }
+  });
+
+  it("同一有效邀請碼可加入規劃中或進行中行程，但不得加入已結束行程", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "invites/STATUSCD1"), inviteDoc(leader));
+    });
+    for (const status of ["planning", "active", "ended"]) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await updateDoc(doc(ctx.firestore(), `trips/${tripId}`), {
+          status,
+          startedAt: status === "planning" ? null : serverTimestamp(),
+          endedAt: status === "ended" ? serverTimestamp() : null,
+          endReason: status === "ended" ? "leader_manual" : null,
+          invitesOpen: true,
+        });
+      });
+      const uid = `status-guest-${status}`;
+      await register(uid);
+      if (status === "ended") {
+        await assertFails(join(uid, "STATUSCD1"));
+      } else {
+        await assertSucceeds(join(uid, "STATUSCD1"));
+      }
+      if (status === "active") {
+        await assertSucceeds(setDoc(doc(db(leader), "invites/ACTIVECD1"), inviteDoc(leader)));
+      }
+    }
   });
 
   it("accepts expiresAt within five minutes of request.time plus one hour", async () => {
