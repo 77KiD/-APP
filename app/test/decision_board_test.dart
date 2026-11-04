@@ -12,8 +12,10 @@ void main() {
   Trip trip({
     TripStatus status = TripStatus.planning,
     DateTime? expectedReturnAt,
+    DateTime? invitesResetAt,
   }) {
     return Trip(
+      invitesResetAt: invitesResetAt,
       id: 't1',
       title: '京都自由行',
       captainId: 'cap',
@@ -42,12 +44,14 @@ void main() {
     bool confirmed = true,
     DateTime? createdAt,
     String code = 'CODE0001',
+    MemberRole issuerRole = MemberRole.captain,
   }) {
     final created = createdAt ?? now.subtract(const Duration(minutes: 5));
     return InviteRecord(
       code: code,
       tripId: 't1',
       createdBy: 'cap',
+      issuerRole: issuerRole,
       createdAt: created,
       expiresAt: created.add(const Duration(hours: 1)),
       serverConfirmed: confirmed,
@@ -122,6 +126,59 @@ void main() {
         .firstWhere((item) => item.title == AppStrings.boardInviteFriends);
     expect(inviteItem.action, BoardAction.openTrip);
     expect(board.shareText(), isNot(contains('CODE0001')));
+  });
+
+  test('關閉公開邀請前一般成員產生的碼不會被分享，隊長的碼不受影響（#60 F01）', () {
+    final captain = member('cap', MemberRole.captain);
+    final resetAt = now.subtract(const Duration(minutes: 1));
+    final memberCode = invite(
+      code: 'MEMBER001',
+      issuerRole: MemberRole.member,
+      createdAt: now.subtract(const Duration(minutes: 3)),
+    );
+    final leaderCode = invite(
+      code: 'LEADER001',
+      createdAt: now.subtract(const Duration(minutes: 10)),
+    );
+
+    final onlyMember = DecisionBoard.build(
+      trip: trip(invitesResetAt: resetAt),
+      self: captain,
+      members: [captain],
+      requests: const [],
+      invites: [memberCode],
+      now: now,
+    );
+    expect(onlyMember.shareableInvite, isNull);
+    expect(onlyMember.shareText(), isNot(contains('MEMBER001')));
+
+    final both = DecisionBoard.build(
+      trip: trip(invitesResetAt: resetAt),
+      self: captain,
+      members: [captain],
+      requests: const [],
+      invites: [memberCode, leaderCode],
+      now: now,
+    );
+    // 一般成員的碼到期時間比較晚，但已失效，不能蓋過隊長的碼。
+    expect(both.shareableInvite?.code, 'LEADER001');
+
+    final afterReset = DecisionBoard.build(
+      trip: trip(invitesResetAt: resetAt),
+      self: captain,
+      members: [captain],
+      requests: const [],
+      invites: [
+        invite(
+          code: 'MEMBER002',
+          issuerRole: MemberRole.member,
+          createdAt: now,
+        ),
+      ],
+      now: now.add(const Duration(minutes: 1)),
+    );
+    // 截止時間之後才產生的一般成員碼照常可以分享。
+    expect(afterReset.shareableInvite?.code, 'MEMBER002');
   });
 
   test('過期的邀請碼不會被分享', () {

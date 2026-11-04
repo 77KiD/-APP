@@ -87,6 +87,65 @@ void main() {
     );
   });
 
+  Future<String> createTrip(TestWorld world) async {
+    final trip = await world.trips.createTrip(
+      const NewTripForm(
+        title: '京都自由行',
+        startDate: '2026-11-01',
+        endDate: '2026-11-05',
+        timeZone: 'Asia/Taipei',
+        returnDate: '',
+        returnTime: '',
+      ),
+    );
+    return trip.id;
+  }
+
+  void tallView(WidgetTester tester) {
+    tester.view.physicalSize = const Size(1200, 3200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
+  testWidgets('畫面載入後邀請碼過期，分享時不會送出舊碼（#60 F02）', (tester) async {
+    tallView(tester);
+    final world = await signedIn();
+    await createTrip(world);
+    await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
+    await tester.pumpAndSettle();
+    expect(find.text(AppStrings.boardShareInviteHint), findsOneWidget);
+
+    // 停在首頁超過一小時，碼已過期。
+    world.clock.current = world.clock.current.add(const Duration(hours: 2));
+    await tester.tap(find.text(AppStrings.boardInviteFriends));
+    await tester.pumpAndSettle();
+
+    expect(world.share.shared, isEmpty);
+    expect(find.text(AppStrings.boardNoShareableInvite), findsWidgets);
+  });
+
+  testWidgets('在行程分頁改了回程，回首頁看板會更新（#60 F03）', (tester) async {
+    tallView(tester);
+    final world = await signedIn();
+    final tripId = await createTrip(world);
+    await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
+    await tester.pumpAndSettle();
+    expect(find.text(AppStrings.boardSetReturn), findsOneWidget);
+
+    await tester.tap(find.text('行程'));
+    await tester.pumpAndSettle();
+    await world.trips.updateExpectedReturnTime(
+      tripId: tripId,
+      proposed: DateTime.utc(2026, 11, 5, 9),
+    );
+    // 凸起的首頁按鈕只有圖示，沒有文字標籤。
+    await tester.tap(find.byIcon(Icons.home_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.boardSetReturn), findsNothing);
+  });
+
   testWidgets('頭像進入個人設定，裡面有隱私說明與登出', (tester) async {
     final world = await signedIn();
     await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
