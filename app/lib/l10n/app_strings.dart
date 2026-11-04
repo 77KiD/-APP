@@ -87,7 +87,9 @@ abstract final class AppStrings {
       '開啟時，任何成員都可以產生邀請碼。關閉後，只有隊長和副隊長可以產生，一般成員已經產生的邀請碼會立刻失效，再打開也不會恢復。隊長和副隊長產生的邀請碼仍用到各自的到期時間。隊長和副隊長都可以切換這項設定。';
   static const inviteRestricted = '公開邀請已關閉。現在只有隊長和副隊長可以產生邀請碼。一般成員已經產生的邀請碼已失效。';
   static const cannotIssueInvite = inviteRestricted;
-  static const inviteClosedByPublicInvite = '公開邀請已關閉，一般成員產生的邀請碼已失效';
+  // 規則看的是關閉時記下的截止時間，再打開公開邀請也不恢復，所以不說「現在已關閉」。
+  static const inviteClosedByPublicInvite =
+      '這個邀請碼已失效。公開邀請關閉過，一般成員在那之前產生的邀請碼不能再使用';
   static const onlyLeadersSetPublicInvite = '只有隊長和副隊長可以變更公開邀請';
   static const inviteAdvisory = '剩餘時間依這台手機估算，實際是否過期以伺服器時間為準。';
   static String copyInviteCode(String code) => '複製邀請碼 $code';

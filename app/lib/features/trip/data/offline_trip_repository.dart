@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:group_trip/core/ids/id_generator.dart';
 import 'package:group_trip/core/time/time_rules.dart';
 import 'package:group_trip/features/auth/domain/auth_models.dart';
@@ -24,6 +26,7 @@ class OfflineTripRepository implements TripRepository {
     required this.clock,
     required this.ids,
     required this.connectivity,
+    this.serverWriteTimeout = const Duration(seconds: 15),
   });
 
   final TripLocalStore local;
@@ -32,6 +35,10 @@ class OfflineTripRepository implements TripRepository {
   final DeviceClock clock;
   final IdGenerator ids;
   final ConnectivityProbe connectivity;
+
+  /// 線上建立旅程與產生邀請碼時，等伺服器確認寫入的上限。
+  /// Firestore 斷線時 `set` 不會失敗，只會排隊等待；不設上限畫面會一直轉。
+  final Duration serverWriteTimeout;
 
   @override
   Future<Trip> createTrip(NewTripForm form) async {
@@ -76,24 +83,25 @@ class OfflineTripRepository implements TripRepository {
         expiresAt: deviceNow.toUtc().add(TripPolicy.inviteLifetime),
       ),
     );
-    await local.enqueue(SyncOp(type: SyncOpType.upsertTrip, tripId: trip.id));
-    await local.enqueue(
+    final createOps = [
+      SyncOp(type: SyncOpType.upsertTrip, tripId: trip.id),
       SyncOp(
         type: SyncOpType.upsertMember,
         tripId: trip.id,
         entityId: account.id,
       ),
-    );
-    await local.enqueue(
       SyncOp(
         type: SyncOpType.upsertInvite,
         tripId: trip.id,
         entityId: trip.inviteCode,
       ),
-    );
+    ];
+    for (final op in createOps) {
+      await local.enqueue(op);
+    }
     if (connectivity.isOnline) {
       try {
-        await _pushTrip(trip.id);
+        await _pushNow(createOps);
       } on TripException {
         await local.discardTrip(trip.id);
         throw ServerWriteException();
@@ -484,25 +492,20 @@ class OfflineTripRepository implements TripRepository {
       expiresAt: deviceNow.toUtc().add(TripPolicy.inviteLifetime),
     );
     await local.saveInvite(invite);
-    await local.enqueue(
-      SyncOp(
-        type: SyncOpType.upsertInvite,
-        tripId: trip.id,
-        entityId: invite.code,
-      ),
+    final inviteOp = SyncOp(
+      type: SyncOpType.upsertInvite,
+      tripId: trip.id,
+      entityId: invite.code,
     );
+    await local.enqueue(inviteOp);
     if (connectivity.isOnline) {
       try {
-        await _pushTrip(trip.id);
+        // 只送這次的邀請碼。佇列裡其他還沒送出的變更交給 _trySync，
+        // 不讓一筆一直被拒的舊變更擋住發碼。
+        await _pushNow([inviteOp]);
       } on TripException {
         await local.deleteInvite(invite.code);
-        await local.removeOp(
-          SyncOp(
-            type: SyncOpType.upsertInvite,
-            tripId: trip.id,
-            entityId: invite.code,
-          ),
-        );
+        await local.removeOp(inviteOp);
         throw ServerWriteException();
       }
     }
@@ -649,14 +652,14 @@ class OfflineTripRepository implements TripRepository {
     await _recordTimeSample();
   }
 
-  Future<void> _pushTrip(String tripId) async {
-    if (!connectivity.isOnline) return;
-    final queue = await local.readQueue();
-    for (final op in queue) {
-      if (op.tripId != tripId || op.type == SyncOpType.upsertItinerary) {
-        continue;
+  /// 立刻送出 [ops]，依序等伺服器確認。逾時視為寫入失敗。
+  Future<void> _pushNow(List<SyncOp> ops) async {
+    for (final op in ops) {
+      try {
+        await _push(op).timeout(serverWriteTimeout);
+      } on TimeoutException {
+        throw ServerWriteException();
       }
-      await _push(op);
       await local.removeOp(op);
     }
   }
