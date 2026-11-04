@@ -297,10 +297,19 @@ class FirestoreTripRemote implements TripRemote {
   @override
   Future<InviteRecord?> fetchInvite(String code) {
     return _guard(() async {
-      final normalized = code.trim().toUpperCase();
-      final snap = await _invites.doc(normalized).get();
+      final normalized = TripPolicy.normalizeInviteCode(code);
+      final snap = await _invites
+          .doc(normalized)
+          .get(const GetOptions(source: Source.server))
+          .timeout(
+            joinWriteTimeout,
+            onTimeout: () => throw InvitePermissionException(),
+          );
       final data = snap.data();
       if (!snap.exists || data == null) return null;
+      if (snap.metadata.hasPendingWrites || snap.metadata.isFromCache) {
+        throw InvitePermissionException();
+      }
       return TripCodec.inviteFromMap(_normalize(data), code: normalized);
     });
   }
@@ -315,15 +324,28 @@ class FirestoreTripRemote implements TripRemote {
   @override
   Future<Trip> join({required String code, required TripMember member}) {
     return _guard(() async {
-      final normalized = code.trim().toUpperCase();
+      final normalized = TripPolicy.normalizeInviteCode(code);
       final DocumentSnapshot<Map<String, dynamic>> inviteSnap;
       try {
-        inviteSnap = await _invites.doc(normalized).get();
+        inviteSnap = await _invites
+            .doc(normalized)
+            .get(const GetOptions(source: Source.server))
+            .timeout(joinWriteTimeout);
+      } on TimeoutException {
+        debugPrint('invite join phase=read-server result=timeout');
+        throw InvitePermissionException();
       } on FirebaseException catch (error) {
         throw _joinUnavailable(error);
       }
       final data = inviteSnap.data();
-      if (!inviteSnap.exists || data == null) throw InviteNotFoundException();
+      if (inviteSnap.metadata.hasPendingWrites ||
+          inviteSnap.metadata.isFromCache) {
+        throw InvitePermissionException();
+      }
+      if (!inviteSnap.exists || data == null) {
+        debugPrint('invite join phase=read-server result=not-found');
+        throw InviteNotFoundException();
+      }
       final record = TripCodec.inviteFromMap(
         _normalize(data),
         code: normalized,
@@ -332,7 +354,10 @@ class FirestoreTripRemote implements TripRemote {
       if (!record.active) throw InviteExpiredException();
       final DateTime now;
       try {
-        now = await serverNow();
+        now = await serverNow().timeout(
+          joinWriteTimeout,
+          onTimeout: () => throw InvitePermissionException(),
+        );
       } on TripException {
         throw InvitePermissionException();
       }

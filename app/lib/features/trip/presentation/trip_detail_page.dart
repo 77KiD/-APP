@@ -56,7 +56,10 @@ class _TripDetailPageState extends State<TripDetailPage> {
       final requests = await deps.trips.listRequests(widget.tripId);
       if (!mounted) return;
       if (!_prefilled && trip.expectedReturnAt != null) {
-        final formatted = TripTime.format(trip.expectedReturnAt!, trip.timeZone);
+        final formatted = TripTime.format(
+          trip.expectedReturnAt!,
+          trip.timeZone,
+        );
         _returnDate.text = formatted.substring(0, 10);
         _returnTime.text = formatted.substring(11);
         _prefilled = true;
@@ -142,10 +145,8 @@ class _TripDetailPageState extends State<TripDetailPage> {
     if (!self.role.canEditExpectedReturnDirectly) return;
     setState(() => _busy = true);
     try {
-      await AppScope.of(context).trips.updateExpectedReturnTime(
-        tripId: trip.id,
-        proposed: null,
-      );
+      await AppScope.of(context).trips
+          .updateExpectedReturnTime(tripId: trip.id, proposed: null);
       _returnDate.clear();
       _returnTime.clear();
       if (!mounted) return;
@@ -161,10 +162,8 @@ class _TripDetailPageState extends State<TripDetailPage> {
   Future<void> _approve(ModificationRequest request) async {
     setState(() => _busy = true);
     try {
-      await AppScope.of(context).trips.approveRequest(
-        tripId: request.tripId,
-        requestId: request.id,
-      );
+      await AppScope.of(context).trips
+          .approveRequest(tripId: request.tripId, requestId: request.id);
       if (!mounted) return;
       await _load();
     } on TripException catch (error) {
@@ -178,10 +177,8 @@ class _TripDetailPageState extends State<TripDetailPage> {
   Future<void> _assign(TripMember member) async {
     setState(() => _busy = true);
     try {
-      await AppScope.of(context).trips.assignViceCaptain(
-        tripId: widget.tripId,
-        userId: member.userId,
-      );
+      await AppScope.of(context).trips
+          .assignViceCaptain(tripId: widget.tripId, userId: member.userId);
       if (!mounted) return;
       await _load();
     } on TripException catch (error) {
@@ -198,15 +195,37 @@ class _TripDetailPageState extends State<TripDetailPage> {
     setState(() => _notice = AppStrings.copiedInvite);
   }
 
+  Future<void> _refreshInvites() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await AppScope.of(context).trips.sync();
+    } on TripException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } finally {
+      if (mounted) {
+        await _load();
+        if (mounted) setState(() => _busy = false);
+      }
+    }
+  }
+
   Future<void> _issueInvite() async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await AppScope.of(context).trips.issueInviteCode(widget.tripId);
+      final invite = await AppScope.of(context).trips
+          .issueInviteCode(widget.tripId);
       if (!mounted) return;
-      setState(() => _notice = AppStrings.inviteIssued);
+      setState(
+        () => _notice = invite.serverConfirmed
+            ? AppStrings.inviteIssued
+            : AppStrings.invitePending,
+      );
       await _load();
     } on TripException catch (error) {
       if (!mounted) return;
@@ -222,10 +241,8 @@ class _TripDetailPageState extends State<TripDetailPage> {
       _error = null;
     });
     try {
-      await AppScope.of(context).trips.setPublicInvite(
-        tripId: widget.tripId,
-        enabled: enabled,
-      );
+      await AppScope.of(context).trips
+          .setPublicInvite(tripId: widget.tripId, enabled: enabled);
       if (!mounted) return;
       await _load();
     } on TripException catch (error) {
@@ -258,7 +275,17 @@ class _TripDetailPageState extends State<TripDetailPage> {
   Widget build(BuildContext context) {
     final trip = _trip;
     return Scaffold(
-      appBar: AppBar(title: Text(trip?.title ?? AppStrings.appTitle)),
+      appBar: AppBar(
+        title: Text(trip?.title ?? AppStrings.appTitle),
+        actions: [
+          IconButton(
+            key: const Key('refresh-invites'),
+            tooltip: '同步旅程與邀請碼',
+            onPressed: _busy || _loading ? null : _refreshInvites,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: Text('正在載入旅程'))
           : trip == null
@@ -284,33 +311,37 @@ class _TripDetailPageState extends State<TripDetailPage> {
                     onChanged: _busy ? null : _setPublicInvite,
                   ),
                 for (final invite in _invites) ...[
-                  SelectableText(
-                    invite.code,
-                    key: invite.code == trip.inviteCode
-                        ? const Key('invite-code')
-                        : Key('invite-${invite.code}'),
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  Text(
-                    TripPolicy.memberInviteBlocked(
-                      invitesResetAt: trip.invitesResetAt,
-                      issuerRole: invite.issuerRole,
-                      createdAt: invite.createdAt,
-                    )
-                        ? AppStrings.inviteClosedByPublicInvite
-                        : _deviceNow == null
-                        ? AppStrings.inviteAdvisory
-                        : AppStrings.inviteRemaining(
-                            TripPolicy.inviteRemaining(
-                              invite.expiresAt,
-                              _deviceNow!,
+                  if (!invite.serverConfirmed)
+                    const Text(AppStrings.invitePending)
+                  else ...[
+                    SelectableText(
+                      invite.code,
+                      key: invite.code == trip.inviteCode
+                          ? const Key('invite-code')
+                          : Key('invite-${invite.code}'),
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    Text(
+                      TripPolicy.memberInviteBlocked(
+                            invitesResetAt: trip.invitesResetAt,
+                            issuerRole: invite.issuerRole,
+                            createdAt: invite.createdAt,
+                          )
+                          ? AppStrings.inviteClosedByPublicInvite
+                          : _deviceNow == null
+                          ? AppStrings.inviteAdvisory
+                          : AppStrings.inviteRemaining(
+                              TripPolicy.inviteRemaining(
+                                invite.expiresAt,
+                                _deviceNow!,
+                              ),
                             ),
-                          ),
-                  ),
-                  OutlinedButton(
-                    onPressed: () => _copyInvite(invite.code),
-                    child: Text(AppStrings.copyInviteCode(invite.code)),
-                  ),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => _copyInvite(invite.code),
+                      child: Text(AppStrings.copyInviteCode(invite.code)),
+                    ),
+                  ],
                 ],
                 const Text(AppStrings.inviteAdvisory),
                 OutlinedButton(
@@ -327,17 +358,20 @@ class _TripDetailPageState extends State<TripDetailPage> {
                 if (_members.length >= 5 && _members.length <= 7)
                   const Text(AppStrings.viceOptional),
                 if (TripPolicy.viceCaptainRequiredToStart(_members.length) &&
-                    !_members.any((member) => member.role == MemberRole.viceCaptain))
+                    !_members.any(
+                      (member) => member.role == MemberRole.viceCaptain,
+                    ))
                   const Text(AppStrings.viceRequired),
-                for (final member in _members) _MemberTile(
-                  member: member,
-                  canAssign:
-                      !_busy &&
-                      _self?.role == MemberRole.captain &&
-                      TripPolicy.canAssignViceCaptain(_members.length) &&
-                      member.role == MemberRole.member,
-                  onAssign: () => _assign(member),
-                ),
+                for (final member in _members)
+                  _MemberTile(
+                    member: member,
+                    canAssign:
+                        !_busy &&
+                        _self?.role == MemberRole.captain &&
+                        TripPolicy.canAssignViceCaptain(_members.length) &&
+                        member.role == MemberRole.member,
+                    onAssign: () => _assign(member),
+                  ),
                 const PageHeading(AppStrings.expectedReturn),
                 LabeledField(
                   label: AppStrings.returnDate,

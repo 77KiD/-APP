@@ -82,6 +82,8 @@ abstract final class AppStrings {
   static const inviteExpired = '邀請碼已過期，請向隊長索取新的邀請碼';
   static const issueInvite = '產生邀請碼';
   static const inviteIssued = '已產生新的邀請碼。較早的邀請碼在各自的 1 小時內仍然有效。';
+  static const invitePending = '尚未同步，邀請碼還不能使用。連線後請重新整理或產生新碼。';
+  static const invalidInviteCode = '請輸入 8–12 碼英文字母或數字的邀請碼';
   static const publicInvite = '公開邀請';
   static const publicInviteHelp =
       '開啟時，任何成員都可以產生邀請碼。關閉後，只有隊長和副隊長可以產生，一般成員已經產生的邀請碼會立刻失效，再打開也不會恢復。隊長和副隊長產生的邀請碼仍用到各自的到期時間。隊長和副隊長都可以切換這項設定。';

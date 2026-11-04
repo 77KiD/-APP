@@ -189,6 +189,7 @@ abstract final class FirestoreSchema {
 
 /// 只留在手機 JSON。不要寫進 Firestore 文件。
 abstract final class LocalOnlyFields {
+  static const inviteServerConfirmed = 'inviteServerConfirmed';
   static const documentId = 'id';
   static const memberIds = 'memberIds';
   static const userId = 'userId';

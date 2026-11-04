@@ -79,6 +79,8 @@ class _InviteEmulatorAppState extends State<InviteEmulatorApp> {
       );
       _setStatus('RUNNING signup');
       await _happyPath(authRepo);
+      _setStatus('RUNNING recovered invitation publication');
+      await _recoveredInvitation(authRepo);
       _setStatus('RUNNING join errors');
       await _joinErrors(authRepo);
       _setStatus('RUNNING closed invite');
@@ -144,6 +146,80 @@ Future<void> _happyPath(FirebaseAuthRepository authRepo) async {
     members.map((member) => member.userId).contains(authRepo.current?.id),
     'B 應在成員名單',
   );
+  await authRepo.signOut();
+}
+
+class _RecoverableConnectivity extends ConnectivityProbe {
+  _RecoverableConnectivity() : super(isOnline: false);
+  bool actualOnline = false;
+  @override
+  Future<void> refresh() async {
+    isOnline = actualOnline;
+  }
+}
+
+/// No production data: two Auth emulator users and the real Firestore rules.
+Future<void> _recoveredInvitation(FirebaseAuthRepository authRepo) async {
+  await _signUp(authRepo, '離線恢復隊長');
+  final clock = FixedDeviceClock(
+    DateTime.now().toUtc().subtract(const Duration(minutes: 10)),
+  );
+  final connectivity = _RecoverableConnectivity();
+  final remote = FirestoreTripRemote(
+    firestore: FirebaseFirestore.instance,
+    currentUserId: () => FirebaseAuth.instance.currentUser?.uid ?? '',
+  );
+  final repository = OfflineTripRepository(
+    local: TripLocalStore(MemoryDocumentStore()),
+    remote: remote,
+    currentAccount: () => authRepo.current,
+    clock: clock,
+    ids: RandomIdGenerator(),
+    connectivity: connectivity,
+  );
+  final trip = await repository.createTrip(_form('離線恢復邀請'));
+  final pending = (await repository.local.readInvites(trip.id)).single;
+  _check(!pending.serverConfirmed, '離線碼不能視為已確認');
+  _check(await remote.fetchInvite(pending.code) == null, '離線碼尚未發布');
+
+  clock.current = DateTime.now().toUtc();
+  connectivity.actualOnline = true; // The Home page has not refreshed.
+  final issued = await repository.issueInviteCode(trip.id);
+  _check(issued.serverConfirmed, '新碼需讀回伺服器確認');
+  final oldPublished = await remote.fetchInvite(pending.code);
+  _check(oldPublished != null, '超過五分鐘的待上傳碼需能首次發布');
+  _check(
+    oldPublished!.expiresAt.isAfter(
+      DateTime.now().toUtc().add(const Duration(minutes: 55)),
+    ),
+    '只延後尚未發布碼的首次效期',
+  );
+  // The document is cached now. An offline read must fail, not turn that cache
+  // into a new server confirmation.
+  await FirebaseFirestore.instance.disableNetwork();
+  try {
+    var rejectedCachedRead = false;
+    try {
+      await remote.fetchInvite(issued.code);
+    } on TripException {
+      rejectedCachedRead = true;
+    }
+    _check(rejectedCachedRead, '離線快取不能充當伺服器確認');
+  } finally {
+    await FirebaseFirestore.instance.enableNetwork();
+  }
+  await authRepo.signOut();
+
+  await _signUp(authRepo, '離線恢復加入者');
+  final joiner = _repository(
+    authRepo,
+    FixedDeviceClock(DateTime.now().toUtc()),
+  );
+  final fullWidth = String.fromCharCodes(
+    issued.code.toLowerCase().runes.map((rune) => rune + 0xfee0),
+  );
+  final joined = await joiner.joinWithInviteCode('　$fullWidth　');
+  _check(joined.id == trip.id, '另一位使用者可用新碼加入');
   await authRepo.signOut();
 }
 

@@ -30,6 +30,16 @@ class ParsedNewTrip {
 }
 
 abstract final class TripPolicy {
+  /// Normalize common mobile input without silently discarding punctuation.
+  static String normalizeInviteCode(String value) {
+    final halfWidth = String.fromCharCodes(
+      value.runes.map(
+        (rune) => rune >= 0xff01 && rune <= 0xff5e ? rune - 0xfee0 : rune,
+      ),
+    );
+    return halfWidth.replaceAll(RegExp(r'[\s\u200B\uFEFF]+'), '').toUpperCase();
+  }
+
   static ParsedNewTrip parseNewTrip(NewTripForm form, DateTime now) {
     final title = form.title.trim();
     if (title.isEmpty) {

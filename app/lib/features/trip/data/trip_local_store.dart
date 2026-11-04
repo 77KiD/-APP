@@ -153,7 +153,10 @@ class TripLocalStore {
     final code = invite.code.trim().toUpperCase();
     return _store.transaction((draft) {
       final invites = _child(draft, FirestoreSchema.invites);
-      invites[code] = TripCodec.inviteToMap(invite);
+      invites[code] = {
+        ...TripCodec.inviteToMap(invite),
+        LocalOnlyFields.inviteServerConfirmed: invite.serverConfirmed,
+      };
       draft[FirestoreSchema.invites] = invites;
     });
   }

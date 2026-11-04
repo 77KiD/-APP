@@ -53,6 +53,8 @@ class _JoinTripPageState extends State<JoinTripPage> {
           LabeledField(
             label: AppStrings.inviteCodeField,
             controller: _code,
+            autocorrect: false,
+            enableSuggestions: false,
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _submit(),
           ),
