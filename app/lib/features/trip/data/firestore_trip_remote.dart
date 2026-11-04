@@ -166,26 +166,33 @@ class FirestoreTripRemote implements TripRemote {
   }
 
   @override
-  Future<void> upsertRequest(ModificationRequest request) {
+  Future<void> upsertRequest(ModificationRequest request) async {
+    // 核准一定要跟旅程一起寫，不能只改申請狀態。
+    if (request.status == RequestStatus.approved) {
+      try {
+        await approveRequest(request);
+      } on RequestHandledException {
+        // 同步時遇到別人已經決定：以伺服器為準，接下來的讀取會更新手機。
+      }
+      return;
+    }
     return _guard(() async {
-      final ref = _trips
-          .doc(request.tripId)
-          .collection(FirestorePaths.requests)
-          .doc(request.id);
+      final ref = _requestRef(request);
       final existing = await ref.get();
-      final proposed = _timestamp(request.proposedExpectedReturnAt);
       if (!existing.exists) {
-        await ref.set({
-          FirestoreSchema.type: FirestoreSchema.requestTypeExpectedReturn,
-          FirestoreSchema.status: RequestStatus.pending.name,
-          FirestoreSchema.proposerId: request.requesterId,
-          FirestoreSchema.payload: {FirestoreSchema.expectedReturnAt: proposed},
-          FirestoreSchema.createdAt: FieldValue.serverTimestamp(),
-          FirestoreSchema.expiresAt: _timestamp(request.expiresAt),
-          FirestoreSchema.decidedBy: null,
-          FirestoreSchema.decidedAt: null,
-        });
-        return;
+        await ref.set(_pendingRequest(request));
+        // 離線時申請還沒上傳就被拒絕：先建立 pending，再往下寫決定，
+        // 不能只建立 pending 就結束，否則決定不會送到伺服器。
+        if (request.status == RequestStatus.pending) return;
+      } else {
+        // 本機仍是 pending 時沒有東西要更新；規則也不允許 pending 改成 pending。
+        if (request.status == RequestStatus.pending) return;
+        // 伺服器已經有人決定了（例如另一位副隊長），以伺服器為準。
+        // 再送一次決定一定會被拒，留在佇列只會卡住後面的同步。
+        if (existing.data()?[FirestoreSchema.status] !=
+            RequestStatus.pending.name) {
+          return;
+        }
       }
       await ref.update({
         FirestoreSchema.status: request.status.name,
@@ -196,6 +203,61 @@ class FirestoreTripRemote implements TripRemote {
       });
     });
   }
+
+  @override
+  Future<void> approveRequest(ModificationRequest request) {
+    return _guard(() async {
+      final tripRef = _trips.doc(request.tripId);
+      final ref = _requestRef(request);
+      final existing = await ref.get();
+      if (!existing.exists) {
+        // 離線時還沒上傳就被核准：先建立 pending（規則只讓提出者自己建立）。
+        await ref.set(_pendingRequest(request));
+      } else if (existing.data()?[FirestoreSchema.status] !=
+          RequestStatus.pending.name) {
+        throw RequestHandledException();
+      }
+      // 旅程與申請放在同一個 batch：任一筆被拒，兩筆都不會留下。
+      // 規則用 getAfter 核對旅程上的值等於申請內容。
+      final batch = _firestore.batch();
+      batch.update(tripRef, {
+        FirestoreSchema.expectedReturnAt: _timestamp(
+          request.proposedExpectedReturnAt,
+        ),
+        FirestoreSchema.updatedAt: FieldValue.serverTimestamp(),
+      });
+      batch.update(ref, {
+        FirestoreSchema.status: RequestStatus.approved.name,
+        FirestoreSchema.decidedBy: request.resolvedBy ?? signedInUserId,
+        FirestoreSchema.decidedAt: FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
+    });
+  }
+
+  DocumentReference<Map<String, dynamic>> _requestRef(
+    ModificationRequest request,
+  ) {
+    return _trips
+        .doc(request.tripId)
+        .collection(FirestorePaths.requests)
+        .doc(request.id);
+  }
+
+  Map<String, Object?> _pendingRequest(ModificationRequest request) => {
+    FirestoreSchema.type: FirestoreSchema.requestTypeExpectedReturn,
+    FirestoreSchema.status: RequestStatus.pending.name,
+    FirestoreSchema.proposerId: request.requesterId,
+    FirestoreSchema.payload: {
+      FirestoreSchema.expectedReturnAt: _timestamp(
+        request.proposedExpectedReturnAt,
+      ),
+    },
+    FirestoreSchema.createdAt: FieldValue.serverTimestamp(),
+    FirestoreSchema.expiresAt: _timestamp(request.expiresAt),
+    FirestoreSchema.decidedBy: null,
+    FirestoreSchema.decidedAt: null,
+  };
 
   @override
   Future<List<ModificationRequest>> fetchRequests(String tripId) {

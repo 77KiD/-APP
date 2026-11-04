@@ -336,14 +336,46 @@ class OfflineTripRepository implements TripRepository {
       expectedReturnAt: request.proposedExpectedReturnAt,
       updatedAt: now,
     );
+    final requestOp = SyncOp(
+      type: SyncOpType.upsertRequest,
+      tripId: tripId,
+      entityId: request.id,
+    );
+    // 核准前就在佇列裡的申請項目（例如申請還沒上傳）失敗時要留著。
+    final hadRequestOp = (await local.readQueue()).any(
+      (op) => op.sameAs(requestOp),
+    );
+    // 核准只排申請項目，不另外排旅程項目：送出時由 remote.approveRequest
+    // 把旅程與申請放在同一個 batch，不會只寫成一半。
     await local.saveTrip(updated);
-    await local.enqueue(SyncOp(type: SyncOpType.upsertTrip, tripId: tripId));
     await _closeRequest(
       request: request,
       status: RequestStatus.approved,
       now: now,
       self: self,
     );
+    final approved = request.copy(
+      status: RequestStatus.approved,
+      resolvedAt: now,
+      resolvedBy: self.userId,
+    );
+    if (connectivity.isOnline) {
+      try {
+        try {
+          await remote.approveRequest(approved).timeout(serverWriteTimeout);
+        } on TimeoutException {
+          throw ServerWriteException();
+        }
+        await local.removeOp(requestOp);
+      } on TripException catch (error) {
+        // 伺服器全部沒寫入（或已被別人決定），手機回到核准前的樣子。
+        await local.saveTrip(trip);
+        await local.saveRequest(request);
+        if (!hadRequestOp) await local.removeOp(requestOp);
+        if (error is RequestHandledException) rethrow;
+        throw ServerWriteException(AppStrings.approveWriteFailed);
+      }
+    }
     await _trySync();
     return (await local.readTrip(tripId))!;
   }

@@ -134,6 +134,7 @@ abstract final class AppStrings {
   static const inviteNotFound = '找不到這個邀請碼';
   static const invitePermissionOrNetwork = '沒有權限或網路中斷，無法加入旅程';
   static const serverWriteFailed = '沒有寫入伺服器，邀請碼不會顯示。請再試一次。';
+  static const approveWriteFailed = '沒有寫入伺服器，這筆申請仍待處理，預計回程時間維持原設定。請再試一次。';
   static const alreadyMember = '你已經是這個旅程的成員';
   static const notMember = '你不是這個旅程的成員';
   static const joinNeedsNetwork = '加入旅程需要網路。邀請碼核對通過後，旅程會存到這台手機。';

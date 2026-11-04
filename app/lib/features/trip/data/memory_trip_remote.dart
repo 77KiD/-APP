@@ -86,11 +86,44 @@ class MemoryTripRemote implements TripRemote {
 
   @override
   Future<void> upsertRequest(ModificationRequest request) async {
+    // 跟 Firestore 一致：核准一定跟旅程一起寫。
+    if (request.status == RequestStatus.approved) {
+      try {
+        await approveRequest(request);
+      } on RequestHandledException {
+        // 已被別人決定，以伺服器為準。
+      }
+      return;
+    }
     final tripRequests = database.requests.putIfAbsent(
       request.tripId,
       () => {},
     );
+    // 跟 Firestore 一致：伺服器上已經決定的申請以伺服器為準。
+    final existing = tripRequests[request.id];
+    if (existing != null && existing.status != RequestStatus.pending) return;
     tripRequests[request.id] = request;
+  }
+
+  @override
+  Future<void> approveRequest(ModificationRequest request) async {
+    final trip = database.trips[request.tripId];
+    if (trip == null) throw TripAccessDenied();
+    final tripRequests = database.requests.putIfAbsent(
+      request.tripId,
+      () => {},
+    );
+    final existing = tripRequests[request.id];
+    if (existing != null && existing.status != RequestStatus.pending) {
+      throw RequestHandledException();
+    }
+    // 跟 Firestore 的 batch 一樣：兩筆一起寫入。
+    database.trips[request.tripId] = trip.copy(
+      setExpectedReturn: true,
+      expectedReturnAt: request.proposedExpectedReturnAt,
+      updatedAt: request.resolvedAt ?? database.clock,
+    );
+    tripRequests[request.id] = request.copy(status: RequestStatus.approved);
   }
 
   @override

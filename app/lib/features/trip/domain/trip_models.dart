@@ -451,7 +451,8 @@ class InvitePermissionException extends TripException {
 }
 
 class ServerWriteException extends TripException {
-  ServerWriteException() : super(AppStrings.serverWriteFailed);
+  ServerWriteException([String? message])
+    : super(message ?? AppStrings.serverWriteFailed);
 }
 
 class InviteExpiredException extends TripException {
@@ -468,6 +469,11 @@ class AlreadyMemberException extends TripException {
 
 class ValidationException extends TripException {
   ValidationException(super.message);
+}
+
+/// 伺服器上這筆修改申請已經被核准或拒絕（例如另一位副隊長先處理了）。
+class RequestHandledException extends ValidationException {
+  RequestHandledException() : super(AppStrings.requestHandled);
 }
 
 class RoleChangeException extends TripException {
