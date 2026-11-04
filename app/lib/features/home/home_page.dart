@@ -4,6 +4,8 @@ import 'package:group_trip/core/theme/semantic_colors.dart';
 import 'package:group_trip/core/theme/spacing.dart';
 import 'package:group_trip/core/widgets/app_shell.dart';
 import 'package:group_trip/core/widgets/form_widgets.dart';
+import 'package:group_trip/features/home/domain/decision_board.dart';
+import 'package:group_trip/features/home/presentation/decision_board_view.dart';
 import 'package:group_trip/features/settings/presentation/settings_page.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/features/trip/presentation/create_trip_page.dart';
@@ -22,6 +24,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   List<Trip> _trips = [];
   String? _selectedTripId;
+  DecisionBoard? _board;
   String? _error;
 
   @override
@@ -53,6 +56,61 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() => _error = error.message);
     }
+    await _loadBoard();
+  }
+
+  /// 看板只讀現有資料：成員、修改申請、邀請碼。讀不到時不擋首頁。
+  Future<void> _loadBoard() async {
+    final trip = _selectedTrip;
+    if (trip == null) {
+      if (mounted) setState(() => _board = null);
+      return;
+    }
+    final deps = AppScope.of(context);
+    try {
+      final members = await deps.trips.listMembers(trip.id);
+      final requests = await deps.trips.listRequests(trip.id);
+      final invites = await deps.trips.listInvites(trip.id);
+      final now = await deps.clock.now();
+      final selfId = deps.auth.current?.id;
+      TripMember? self;
+      for (final member in members) {
+        if (member.userId == selfId) self = member;
+      }
+      if (!mounted) return;
+      setState(
+        () => _board = DecisionBoard.build(
+          trip: trip,
+          self: self,
+          members: members,
+          requests: requests,
+          invites: invites,
+          now: now,
+        ),
+      );
+    } on TripException {
+      if (mounted) setState(() => _board = null);
+    }
+  }
+
+  Future<void> _onBoardAction(BoardAction action) async {
+    final board = _board;
+    if (board == null) return;
+    switch (action) {
+      case BoardAction.openTrip:
+        await _openTrip(board.trip);
+      case BoardAction.shareInvite:
+        final invite = board.shareableInvite;
+        if (invite == null) return;
+        await AppScope.of(context).share
+            .shareText(DecisionBoard.inviteShareText(board.trip, invite));
+    }
+  }
+
+  Future<void> _shareBoard() async {
+    final board = _board;
+    if (board == null) return;
+    await AppScope.of(context).share.shareText(board.shareText());
   }
 
   Future<void> _openCreate() async {
@@ -90,6 +148,9 @@ class _HomePageState extends State<HomePage> {
               localMode: !deps.firebaseConfigured,
               trips: _trips,
               error: _error,
+              board: _board,
+              onBoardAction: _onBoardAction,
+              onShareBoard: _shareBoard,
               onOpenTrip: _openTrip,
               onCreate: _openCreate,
               onJoin: () => _open(const JoinTripPage()),
@@ -118,6 +179,9 @@ class _HomeTab extends StatelessWidget {
     required this.localMode,
     required this.trips,
     required this.error,
+    required this.board,
+    required this.onBoardAction,
+    required this.onShareBoard,
     required this.onOpenTrip,
     required this.onCreate,
     required this.onJoin,
@@ -127,6 +191,9 @@ class _HomeTab extends StatelessWidget {
   final bool localMode;
   final List<Trip> trips;
   final String? error;
+  final DecisionBoard? board;
+  final ValueChanged<BoardAction> onBoardAction;
+  final VoidCallback onShareBoard;
   final ValueChanged<Trip> onOpenTrip;
   final VoidCallback onCreate;
   final VoidCallback onJoin;
@@ -163,6 +230,14 @@ class _HomeTab extends StatelessWidget {
         for (final trip in trips) ...[
           _TripCard(trip: trip, onTap: () => onOpenTrip(trip)),
           const SizedBox(height: AppSpacing.s3),
+        ],
+        if (board != null) ...[
+          const SizedBox(height: AppSpacing.s2),
+          DecisionBoardView(
+            board: board!,
+            onAction: onBoardAction,
+            onShareBoard: onShareBoard,
+          ),
         ],
         FormErrorText(error),
         const SizedBox(height: AppSpacing.s2),
