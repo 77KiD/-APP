@@ -969,6 +969,70 @@ describe("invite expiry and invitesOpen", () => {
     await assertFails(setDoc(doc(db(member), "invites/TOOSOON01"), inviteDoc(member, tooSoon)));
   });
 
+  // Codex 審核 #53 時在模擬器重現：同一個 batch 結束旅程又發碼會成功。
+  // 這裡把當時的 probe 改成預期整筆被拒。
+  it("同一個 batch 結束旅程又發碼，整筆被拒", async () => {
+    for (const [index, uid] of [leader, deputy].entries()) {
+      const code = `BATCHEND${index}`;
+      const userDb = db(uid);
+      const batch = writeBatch(userDb);
+      batch.update(doc(userDb, `trips/${tripId}`), {
+        status: "ended",
+        endedAt: serverTimestamp(),
+        endReason: "leader_manual",
+        updatedAt: serverTimestamp(),
+      });
+      batch.set(doc(userDb, `invites/${code}`), inviteDoc(uid));
+      await assertFails(batch.commit());
+      const trip = await assertSucceeds(getDoc(doc(db(leader), `trips/${tripId}`)));
+      assert.equal(trip.get("status"), "planning");
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const invite = await getDoc(doc(ctx.firestore(), `invites/${code}`));
+        assert.equal(invite.exists(), false);
+      });
+    }
+  });
+
+  it("同一個 batch 改旅程名稱又發碼仍可成功", async () => {
+    const leaderDb = db(leader);
+    const batch = writeBatch(leaderDb);
+    // 真的改名。邀請碼帶舊名稱「京都自由行」：規則用 get() 讀 commit 前的 title。
+    batch.update(doc(leaderDb, `trips/${tripId}`), {
+      title: "大阪自由行",
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(leaderDb, "invites/BATCHOK01"), inviteDoc(leader));
+    await assertSucceeds(batch.commit());
+    const trip = await assertSucceeds(getDoc(doc(leaderDb, `trips/${tripId}`)));
+    assert.equal(trip.get("title"), "大阪自由行");
+    const invite = await assertSucceeds(getDoc(doc(leaderDb, "invites/BATCHOK01")));
+    assert.equal(invite.get("tripTitle"), "京都自由行");
+  });
+
+  it("已結束行程不能補建隊長成員文件，未結束時可以", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await deleteDoc(doc(ctx.firestore(), `trips/${tripId}/members/${leader}`));
+    });
+    const leaderDoc = doc(db(leader), `trips/${tripId}/members/${leader}`);
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), `trips/${tripId}`), {
+        status: "ended",
+        endedAt: serverTimestamp(),
+        endReason: "leader_manual",
+      });
+    });
+    await assertFails(setDoc(leaderDoc, leaderMember("領隊")));
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), `trips/${tripId}`), {
+        status: "planning",
+        endedAt: null,
+        endReason: null,
+      });
+    });
+    await assertSucceeds(setDoc(leaderDoc, leaderMember("領隊")));
+  });
+
   it("已結束行程即使開放邀請也不得建立邀請碼", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       await updateDoc(doc(ctx.firestore(), `trips/${tripId}`), {

@@ -150,6 +150,7 @@ trips/{tripId}
 - `trips.invitesOpen == true`（建立旅程時的預設）：該趟的任何成員。
 - `invitesOpen == false`：只有隊長或副隊長。
 - 還不是成員的人不能建立。
+- 旅程 `status == "ended"` 時，任何角色都不能建立，隊長與副隊長也一樣。規則同時看這次寫入前（`get`）與寫入後（`getAfter`）的旅程，所以同一個 batch 結束旅程又發碼也會整筆被拒。
 
 關掉邀請是單獨的一筆旅程更新，隊長或副隊長都可以寫：`invitesOpen` 從 true 改成 false，而且同一筆把 `invitesResetAt` 設成這次的 `request.time`。這一筆只使**當時已存在、且 `creatorRole` 為 `member` 的碼**失效。隊長或副隊長在關掉之前發的碼繼續有效，直到各自的 1 小時。關掉之後只有他們能發新碼，新碼照常可用。再把 `invitesOpen` 改回 true 時不能動 `invitesResetAt`，所以被這道截止時間擋下的一般成員碼不會復活。若要再清掉重新打開之後由一般成員發出的碼，就再關一次，會寫入新的 `invitesResetAt`；隊長與副隊長的碼仍然不受影響。一般成員不能改這兩個欄位。隊長或副隊長也可以把某個碼的 `active` 改成 false，那只撤銷那一個碼。
 
@@ -186,7 +187,7 @@ trips/{tripId}
 
 定案（ADR 0010）：旅程上的定案欄位只有 `finalVersionId`。30 天含出發日與結束日，所以 `2030-01-01` 到 `2030-01-30` 可以建立或改成這個區間；到 `2030-01-31` 不行。閏年照日曆日計算。日期差已經超過 29 天的旅程，客戶端要先把日期收進這個上限才改得了其他欄位。
 
-建立順序（客戶端先 `get` 再 `set`。文件不存在時，這個 `get` 必須成功且 `exists` 為 false，否則 `set` 不會執行）：
+建立順序（客戶端直接 `set`，被拒時才 `get` 確認文件是否已存在。文件不存在時，這個 `get` 必須成功且 `exists` 為 false，不能再回權限錯誤；加入旅程時仍會先 `get` 自己的成員文件，判斷是否已加入）：
 
 1. 寫 `users/{uid}`（已滿 13 歲）。
 2. 已註冊使用者可以 `get` 尚未建立的 `trips/{tripId}`。隨機 id 只會得到不存在，讀不到別人已經建立的旅程。接著寫 `trips/{tripId}`（`leaderId` 是自己，`invitesOpen` 為 true，`invitesResetAt` 為 null）。建立之後，建立者能 `get`，因為 `leaderId` 相符。
@@ -210,6 +211,8 @@ trips/{tripId}
 
 一般成員加入：`role` 只能是 `member`，邀請碼必須通過上面的伺服器時間檢查（含 `invitesResetAt`），`isMinor` 必須算對。不能自封隊長或副隊長。同一個有效碼可以重複使用。
 
+旅程 `status == "ended"` 時不能新增任何成員文件：旅程結束前發出、還沒到期的碼不能再用來加入，也不能補建隊長的成員文件。和發碼一樣，寫入前與寫入後都檢查，同一個 batch 結束旅程又加入成員會整筆被拒。既有成員仍依原權限讀取資料、撤銷邀請碼。
+
 隊長可把其他成員的 `role` 改成 `deputy` 或 `member`，不能改成 `leader`，也不能改對方的 `isMinor`。人數與副隊長是否必填（2–4 人不設、8 人以上必設）在 #14 才強制。
 
 成員文件不能由客戶端刪除。退出與解散在 #14。
@@ -228,6 +231,8 @@ trips/{tripId}
 | `expiresAt` | timestamp \| null | null 表示不過期（5–7 人且沒有副隊長的例外，過期工作在 #14）。有值則須落在現在起 31 分鐘內（30 分鐘加上餘裕） |
 | `decidedBy` | string \| null | 同意或拒絕的隊長或副隊長 |
 | `decidedAt` | timestamp \| null | 伺服器時間 |
+
+過期：`expiresAt` 有值時，伺服器時間到達或超過 `expiresAt`（相等也算過期）就不能再改成 `approved`，即使排程還沒把它標成 `expired`。仍在 `pending` 的過期申請可以改成 `rejected`，讓隊長或副隊長把它收掉。`expiresAt` 為 null 的申請不過期，隨時可核准或拒絕。客戶端仍不能寫 `expired`。
 
 `payload`：
 
