@@ -42,6 +42,13 @@ abstract final class AppStrings {
   static const consentDecline = '先不要，全部關閉';
 
   static const myTrips = '我的旅程';
+  static String greeting(String name) => '嗨，$name';
+  static const settingsTitle = '個人設定';
+  static const statusPlanning = '規劃中';
+  static const statusActive = '旅途中';
+  static const statusEnded = '已結束';
+  static String tripDates(String start, String end) => '$start – $end';
+  static const findComingSoon = '找人地圖在之後的版本推出。現在可以在旅程頁看成員與預計回程時間。';
   static const emptyTrips = '還沒有旅程。建立一趟旅程，或用邀請碼加入朋友的旅程。';
   static const createTrip = '建立旅程';
   static const joinTrip = '用邀請碼加入';

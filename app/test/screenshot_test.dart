@@ -48,7 +48,6 @@ void main() {
         theme: AppTheme.light(),
         home: const AppShell(
           currentTrip: '東京自由行 2026',
-          chatUnreadCount: 2,
         ),
       ),
     );
@@ -71,7 +70,6 @@ void main() {
           data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
           child: const AppShell(
             currentTrip: '東京自由行 2026',
-            chatUnreadCount: 2,
           ),
         ),
       ),
@@ -93,7 +91,6 @@ void main() {
         theme: AppTheme.dark(),
         home: const AppShell(
           currentTrip: '東京自由行 2026',
-          chatUnreadCount: 2,
         ),
       ),
     );
@@ -116,7 +113,6 @@ void main() {
           data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
           child: const AppShell(
             currentTrip: '東京自由行 2026',
-            chatUnreadCount: 2,
           ),
         ),
       ),

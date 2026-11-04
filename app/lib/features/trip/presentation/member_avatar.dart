@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:group_trip/core/theme/app_colors.dart';
+import 'package:group_trip/core/theme/semantic_colors.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/l10n/app_strings.dart';
 
@@ -17,8 +18,8 @@ class MemberAvatar extends StatelessWidget {
       image: true,
       child: ExcludeSemantics(
         child: CircleAvatar(
-          backgroundColor: AppColors.primary,
-          foregroundColor: AppColors.onPrimary,
+          backgroundColor: context.colors.primary,
+          foregroundColor: context.colors.onAccent,
           child: Text(initial),
         ),
       ),

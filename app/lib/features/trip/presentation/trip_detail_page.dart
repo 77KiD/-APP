@@ -9,9 +9,12 @@ import 'package:group_trip/features/trip/presentation/member_avatar.dart';
 import 'package:group_trip/l10n/app_strings.dart';
 
 class TripDetailPage extends StatefulWidget {
-  const TripDetailPage({required this.tripId, super.key});
+  const TripDetailPage({required this.tripId, this.embedded = false, super.key});
 
   final String tripId;
+
+  /// 放在底部導覽的分頁裡時為 true：不顯示返回鍵，也不再預留狀態列高度。
+  final bool embedded;
 
   @override
   State<TripDetailPage> createState() => _TripDetailPageState();
@@ -276,6 +279,8 @@ class _TripDetailPageState extends State<TripDetailPage> {
     final trip = _trip;
     return Scaffold(
       appBar: AppBar(
+        primary: !widget.embedded,
+        automaticallyImplyLeading: !widget.embedded,
         title: Text(trip?.title ?? AppStrings.appTitle),
         actions: [
           IconButton(

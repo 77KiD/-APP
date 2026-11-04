@@ -6,7 +6,6 @@ enum BottomNavTab {
   itinerary,
   find,
   home,
-  chat,
   members;
 
   String get label {
@@ -17,8 +16,6 @@ enum BottomNavTab {
         return '找人';
       case BottomNavTab.home:
         return '首頁';
-      case BottomNavTab.chat:
-        return '聊天';
       case BottomNavTab.members:
         return '成員';
     }
@@ -32,8 +29,6 @@ enum BottomNavTab {
         return Icons.explore_outlined;
       case BottomNavTab.home:
         return Icons.home_outlined;
-      case BottomNavTab.chat:
-        return Icons.chat_bubble_outline;
       case BottomNavTab.members:
         return Icons.people_outline;
     }
@@ -47,8 +42,6 @@ enum BottomNavTab {
         return Icons.explore;
       case BottomNavTab.home:
         return Icons.home;
-      case BottomNavTab.chat:
-        return Icons.chat_bubble;
       case BottomNavTab.members:
         return Icons.people;
     }
@@ -61,7 +54,8 @@ class AppShell extends StatefulWidget {
     this.currentTrip,
     this.onSettingsTap,
     this.hideBottomNav = false,
-    this.chatUnreadCount = 0,
+    this.bodyBuilder,
+    this.connectionStatus = ConnectionStatus.online,
     this.pendingApprovalsCount = 0,
     this.isLeaderOrDeputy = false,
   });
@@ -69,7 +63,12 @@ class AppShell extends StatefulWidget {
   final String? currentTrip;
   final VoidCallback? onSettingsTap;
   final bool hideBottomNav;
-  final int chatUnreadCount;
+
+  /// 每個分頁的內容。回傳 null 時用預設的說明畫面。
+  final Widget? Function(BuildContext context, BottomNavTab tab)? bodyBuilder;
+
+  /// 由 App 依連線狀態傳入，顯示在右上角。
+  final ConnectionStatus connectionStatus;
   final int pendingApprovalsCount;
   final bool isLeaderOrDeputy;
 
@@ -79,7 +78,6 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   BottomNavTab _currentTab = BottomNavTab.home;
-  final ConnectionStatus _connectionStatus = ConnectionStatus.online;
 
   @override
   Widget build(BuildContext context) {
@@ -92,7 +90,7 @@ class _AppShellState extends State<AppShell> {
           _AppHeader(
             currentTab: _currentTab,
             currentTrip: widget.currentTrip,
-            connectionStatus: _connectionStatus,
+            connectionStatus: widget.connectionStatus,
             onSettingsTap: widget.onSettingsTap,
           ),
           Expanded(
@@ -105,7 +103,6 @@ class _AppShellState extends State<AppShell> {
           : _AppBottomNav(
               currentTab: _currentTab,
               onTabChanged: (tab) => setState(() => _currentTab = tab),
-              chatUnreadCount: widget.chatUnreadCount,
               pendingApprovalsCount: widget.pendingApprovalsCount,
               showApprovalsCount: widget.isLeaderOrDeputy,
             ),
@@ -113,6 +110,8 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _buildBody() {
+    final custom = widget.bodyBuilder?.call(context, _currentTab);
+    if (custom != null) return custom;
     switch (_currentTab) {
       case BottomNavTab.itinerary:
         return _EmptyStateBody(
@@ -131,12 +130,6 @@ class _AppShellState extends State<AppShell> {
           icon: Icons.home_outlined,
           title: '首頁',
           message: '首頁內容開發中',
-        );
-      case BottomNavTab.chat:
-        return _EmptyStateBody(
-          icon: Icons.chat_bubble_outline,
-          title: '聊天',
-          message: widget.currentTrip == null ? '建立或加入旅程後，就能和夥伴聊天' : '聊天功能開發中',
         );
       case BottomNavTab.members:
         return _EmptyStateBody(
@@ -235,8 +228,6 @@ class _AppHeader extends StatelessWidget {
         return '找人';
       case BottomNavTab.home:
         return '首頁';
-      case BottomNavTab.chat:
-        return '聊天';
       case BottomNavTab.members:
         return '成員';
     }
@@ -251,8 +242,6 @@ class _AppHeader extends StatelessWidget {
       case BottomNavTab.itinerary:
         return '建立或加入旅程後可用';
       case BottomNavTab.find:
-        return '建立或加入旅程後可用';
-      case BottomNavTab.chat:
         return '建立或加入旅程後可用';
       case BottomNavTab.members:
         return '建立或加入旅程後可用';
@@ -374,14 +363,12 @@ class _AppBottomNav extends StatelessWidget {
   const _AppBottomNav({
     required this.currentTab,
     required this.onTabChanged,
-    this.chatUnreadCount = 0,
     this.pendingApprovalsCount = 0,
     this.showApprovalsCount = false,
   });
 
   final BottomNavTab currentTab;
   final ValueChanged<BottomNavTab> onTabChanged;
-  final int chatUnreadCount;
   final int pendingApprovalsCount;
   final bool showApprovalsCount;
 
@@ -404,11 +391,9 @@ class _AppBottomNav extends StatelessWidget {
                 tab: tab,
                 isSelected: currentTab == tab,
                 onTap: () => onTabChanged(tab),
-                badgeCount: tab == BottomNavTab.chat
-                    ? chatUnreadCount
-                    : (tab == BottomNavTab.members && showApprovalsCount
-                        ? pendingApprovalsCount
-                        : 0),
+                badgeCount: tab == BottomNavTab.members && showApprovalsCount
+                    ? pendingApprovalsCount
+                    : 0,
               ),
             ),
         ],
@@ -437,9 +422,7 @@ class _NavButton extends StatelessWidget {
 
     String semanticsLabel = tab.label;
     if (badgeCount > 0) {
-      if (tab == BottomNavTab.chat) {
-        semanticsLabel = '$semanticsLabel，$badgeCount 則未讀訊息';
-      } else if (tab == BottomNavTab.members) {
+      if (tab == BottomNavTab.members) {
         semanticsLabel = '$semanticsLabel，$badgeCount 則待審核';
       }
     }
