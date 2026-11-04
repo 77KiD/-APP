@@ -33,3 +33,5 @@ app/firebase.local.json
 artifacts/
 *.apk
 app/**/GeneratedPluginRegistrant.*
+# 本機的對話紀錄與工作日誌（可能含個人資料），不要提交。
+session-logs/
