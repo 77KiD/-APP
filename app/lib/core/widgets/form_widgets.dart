@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:group_trip/core/theme/semantic_colors.dart';
+import 'package:group_trip/core/theme/app_colors.dart';
 
 class LabeledField extends StatelessWidget {
   const LabeledField({
@@ -64,8 +64,7 @@ class FormErrorText extends StatelessWidget {
         child: Text(
           message!,
           key: const Key('form-error'),
-          // 跟著淺色／深色主題，深色底上也維持對比。
-          style: TextStyle(color: context.colors.red, fontSize: 16),
+          style: const TextStyle(color: AppColors.error, fontSize: 16),
         ),
       ),
     );

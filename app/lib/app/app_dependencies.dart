@@ -1,6 +1,5 @@
 import 'package:group_trip/core/ids/id_generator.dart';
 import 'package:group_trip/core/location/location_permission_gateway.dart';
-import 'package:group_trip/core/share/share_gateway.dart';
 import 'package:group_trip/core/telemetry/telemetry.dart';
 import 'package:group_trip/core/time/time_rules.dart';
 import 'package:group_trip/features/auth/domain/auth_models.dart';
@@ -20,7 +19,6 @@ class AppDependencies {
     required this.connectivity,
     required this.ids,
     required this.firebaseConfigured,
-    this.share = const SystemShareGateway(),
   });
 
   final AuthRepository auth;
@@ -33,7 +31,4 @@ class AppDependencies {
   final ConnectivityProbe connectivity;
   final IdGenerator ids;
   final bool firebaseConfigured;
-
-  /// 系統分享選單（分享到 LINE）。
-  final ShareGateway share;
 }
