@@ -494,8 +494,12 @@ class OfflineTripRepository implements TripRepository {
     await local.saveTrip(trip);
     await local.saveMembers(trip.id, members);
     await _cacheInvites(trip.id);
-    final used = await remote.fetchInvite(code);
-    if (used != null) await local.saveInvite(used.withServerConfirmation(true));
+    try {
+      final used = await remote.fetchInvite(code);
+      if (used != null) await local.saveInvite(used.withServerConfirmation(true));
+    } on TripException {
+      // Joining already succeeded. Optional invite caching cannot undo it.
+    }
     return trip;
   }
 
@@ -516,7 +520,7 @@ class OfflineTripRepository implements TripRepository {
         membershipConfirmed = members.any(
           (member) => member.userId == account.id,
         );
-        await local.saveMembers(tripId, members);
+        if (membershipConfirmed) await local.saveMembers(tripId, members);
       } on TripAccessDenied {
         // A locally-created trip may not have its creator membership yet.
         // Network errors must surface instead of rewriting stale member data.
