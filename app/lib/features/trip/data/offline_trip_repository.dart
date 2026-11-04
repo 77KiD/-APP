@@ -360,13 +360,14 @@ class OfflineTripRepository implements TripRepository {
       resolvedBy: self.userId,
     );
     await local.saveRequest(closed);
-    await local.enqueue(
-      SyncOp(
-        type: SyncOpType.upsertRequest,
-        tripId: request.tripId,
-        entityId: request.id,
-      ),
+    final op = SyncOp(
+      type: SyncOpType.upsertRequest,
+      tripId: request.tripId,
+      entityId: request.id,
     );
+    // 移除舊位置，讓核准結果排在旅程更新之後；過期狀態只留在本機。
+    await local.removeOp(op);
+    if (status != RequestStatus.expired) await local.enqueue(op);
   }
 
   @override
