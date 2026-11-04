@@ -71,6 +71,14 @@ service cloud.firestore {
       return get(tripPath(tripId)).data.status != "ended";
     }
 
+    // get() sees the trip before this commit and getAfter() sees it after.
+    // Checking both stops one batch from ending the trip and minting a code or
+    // adding a member in the same commit. Outside a batch both read the same doc.
+    function tripOpenAcrossBatch(tripId) {
+      return tripOpen(tripId)
+        && getAfter(tripPath(tripId)).data.status != "ended";
+    }
+
     function validDisplayName(value) {
       return value is string && value.size() >= 1 && value.size() <= 40;
     }
@@ -429,7 +437,8 @@ service cloud.firestore {
         && expiresOneServerHourFromNow(request.resource.data.expiresAt)
         && canIssueInvite(request.resource.data.tripId)
         // An ended trip takes no new members, so it mints no new codes either.
-        && tripOpen(request.resource.data.tripId)
+        // Checked across the batch so ending the trip and minting can't share a commit.
+        && tripOpenAcrossBatch(request.resource.data.tripId)
         && request.resource.data.tripTitle == get(tripPath(request.resource.data.tripId)).data.title;
 
       allow update: if isLeaderOrDeputy(resource.data.tripId)
@@ -562,8 +571,12 @@ service cloud.firestore {
           );
         allow list: if isMember(tripId);
 
+        // An ended trip takes no new members: no join with a code minted before
+        // it ended, and no late leader doc. Checked before and after the write
+        // so one batch cannot end the trip and add a member together.
         allow create: if registered()
           && request.auth.uid == memberId
+          && tripOpenAcrossBatch(tripId)
           && validMemberShape(request.resource.data)
           && request.resource.data.joinedAt == request.time
           && request.resource.data.isMinor == actorIsMinor()
@@ -574,8 +587,6 @@ service cloud.firestore {
               && get(tripPath(tripId)).data.leaderId == request.auth.uid
             ) || (
               request.resource.data.role == "member"
-              // Codes minted before the trip ended must not let anyone join after.
-              && tripOpen(tripId)
               && inviteGrants(request.resource.data.inviteCode, tripId)
             )
           );
