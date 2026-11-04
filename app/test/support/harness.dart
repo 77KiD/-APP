@@ -18,7 +18,11 @@ import 'package:group_trip/features/trip/data/trip_local_store.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 
 class TestWorld {
-  TestWorld({DateTime? now, bool online = true}) {
+  TestWorld({
+    DateTime? now,
+    bool online = true,
+    bool firebaseConfigured = false,
+  }) {
     tzdata.initializeTimeZones();
     clock = FixedDeviceClock(now ?? DateTime.utc(2026, 10, 26, 1));
     connectivity = ConnectivityProbe(isOnline: online);
@@ -61,7 +65,7 @@ class TestWorld {
       ),
       connectivity: connectivity,
       ids: SequentialIdGenerator(),
-      firebaseConfigured: false,
+      firebaseConfigured: firebaseConfigured,
     );
   }
 

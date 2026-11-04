@@ -496,7 +496,9 @@ class OfflineTripRepository implements TripRepository {
     await _cacheInvites(trip.id);
     try {
       final used = await remote.fetchInvite(code);
-      if (used != null) await local.saveInvite(used.withServerConfirmation(true));
+      if (used != null) {
+        await local.saveInvite(used.withServerConfirmation(true));
+      }
     } on TripException {
       // Joining already succeeded. Optional invite caching cannot undo it.
     }

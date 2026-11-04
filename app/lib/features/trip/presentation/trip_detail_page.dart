@@ -302,6 +302,11 @@ class _TripDetailPageState extends State<TripDetailPage> {
                       : '${AppStrings.expectedReturn}：${TripTime.format(trip.expectedReturnAt!, trip.timeZone)}',
                 ),
                 const PageHeading(AppStrings.inviteCode),
+                if (!AppScope.of(context).firebaseConfigured)
+                  const Text(
+                    AppStrings.localModeInviteNotice,
+                    key: Key('local-mode-invite-notice'),
+                  ),
                 if (TripPolicy.canTogglePublicInvite(_self?.role))
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,

@@ -35,6 +35,14 @@ class _JoinTripPageState extends State<JoinTripPage> {
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => TripDetailPage(tripId: trip.id)),
       );
+    } on InviteNotFoundException {
+      if (!mounted) return;
+      // 本機模式下別人手機上的碼一定找不到，要講清楚原因，不能只說找不到。
+      setState(
+        () => _error = deps.firebaseConfigured
+            ? AppStrings.inviteNotFound
+            : AppStrings.localModeInviteNotFound,
+      );
     } on TripException catch (error) {
       if (!mounted) return;
       setState(() => _error = error.message);
@@ -50,6 +58,11 @@ class _JoinTripPageState extends State<JoinTripPage> {
       body: FormColumn(
         children: [
           const PageHeading(AppStrings.joinTitle),
+          if (!AppScope.of(context).firebaseConfigured)
+            const Text(
+              AppStrings.localModeInviteNotice,
+              key: Key('local-mode-invite-notice'),
+            ),
           LabeledField(
             label: AppStrings.inviteCodeField,
             controller: _code,

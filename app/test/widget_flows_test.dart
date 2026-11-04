@@ -208,6 +208,12 @@ void main() {
       wrapPage(world.deps, TripDetailPage(tripId: trip.id)),
     );
     await tester.pumpAndSettle();
+    // 本機模式說明會把名單往下推，清單是延遲建立的，先捲到最後一列。
+    await tester.scrollUntilVisible(
+      find.text(AppStrings.roleMember),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(
       find.text(AppStrings.roleCaptain, skipOffstage: false),
       findsOneWidget,
