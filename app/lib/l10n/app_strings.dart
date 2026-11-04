@@ -132,6 +132,11 @@ abstract final class AppStrings {
   static const submitJoin = '加入旅程';
   static const emptyInvite = '請輸入邀請碼';
   static const inviteNotFound = '找不到這個邀請碼';
+  // 沒有 FIREBASE_* 編譯參數的版本只用 MemoryTripRemote，邀請碼不會離開這台手機。
+  static const localModeInviteNotice =
+      '這個版本沒有連上 Firebase（本機模式）。邀請碼只存在這台手機，其他手機無法用它加入。要跨手機加入，請安裝連線版 App。';
+  static const localModeInviteNotFound =
+      '找不到這個邀請碼。這個版本是本機模式，只能加入這台手機上建立的旅程；別人手機上的邀請碼要用連線版 App 才能加入。';
   static const invitePermissionOrNetwork = '沒有權限或網路中斷，無法加入旅程';
   static const serverWriteFailed = '沒有寫入伺服器，邀請碼不會顯示。請再試一次。';
   static const approveWriteFailed = '沒有寫入伺服器，這筆申請仍待處理，預計回程時間維持原設定。請再試一次。';
