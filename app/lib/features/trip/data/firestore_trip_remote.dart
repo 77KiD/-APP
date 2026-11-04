@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:group_trip/core/time/time_rules.dart';
@@ -14,10 +16,15 @@ class FirestoreTripRemote implements TripRemote {
   FirestoreTripRemote({
     required this.currentUserId,
     FirebaseFirestore? firestore,
+    this.joinWriteTimeout = const Duration(seconds: 15),
   }) : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
   final String Function() currentUserId;
+
+  /// 加入時等成員寫入被伺服器確認的上限。
+  /// 斷線時 `set` 不會失敗，只會排隊；超過這個時間就當成網路中斷。
+  final Duration joinWriteTimeout;
 
   String get signedInUserId => currentUserId();
 
@@ -259,6 +266,8 @@ class FirestoreTripRemote implements TripRemote {
         _normalize(data),
         code: normalized,
       );
+      // 規則要求 active == true。先在這裡擋下，免得被拒後誤顯示成公開邀請已關閉。
+      if (!record.active) throw InviteExpiredException();
       final DateTime now;
       try {
         now = await serverNow();
@@ -307,12 +316,20 @@ class FirestoreTripRemote implements TripRemote {
           FirestoreSchema.photoUrl: member.photoUrl,
           FirestoreSchema.inviteCode: normalized,
           FirestoreSchema.joinedAt: FieldValue.serverTimestamp(),
-        });
+        }).timeout(joinWriteTimeout);
+      } on TimeoutException {
+        debugPrint('join member write timed out after $joinWriteTimeout');
+        throw InvitePermissionException();
       } on FirebaseException catch (error) {
         // 外人讀不到旅程，所以關邀請這件事是由規則拒絕這次寫入。
         // creatorRole 在上面的邀請文件裡。只有伺服器明確拒絕，
         // 而且是一般成員的碼，才換成公開邀請已關閉。
         _logFirebase(error);
+        // 檢查到寫入之間碼可能剛好過期，這也是 permission-denied。
+        if (error.code == 'permission-denied' &&
+            await _joinExpiredNow(record)) {
+          throw InviteExpiredException();
+        }
         throw exceptionForMemberJoinWrite(error, record.issuerRole);
       }
       final tripSnap = await _trips.doc(tripId).get();
@@ -609,6 +626,20 @@ class FirestoreTripRemote implements TripRemote {
       return InviteClosedException();
     }
     return InvitePermissionException();
+  }
+
+  /// 成員寫入被拒後，再用伺服器時間確認一次邀請碼是否已過期。讀不到時間就當沒過期。
+  Future<bool> _joinExpiredNow(InviteRecord record) async {
+    try {
+      final now = await serverNow().timeout(joinWriteTimeout);
+      return TripPolicy.isInviteJoinExpired(
+        expiresAt: record.expiresAt,
+        createdAt: record.createdAt,
+        now: now,
+      );
+    } on Object {
+      return false;
+    }
   }
 
   InvitePermissionException _joinUnavailable(FirebaseException error) {

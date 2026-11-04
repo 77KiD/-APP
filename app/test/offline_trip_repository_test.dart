@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -679,6 +680,85 @@ void main() {
       before.map((invite) => invite.code),
     );
   });
+
+  test('佇列裡有一筆一直被拒的舊變更，仍可產生邀請碼', () async {
+    final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
+    final database = MemoryTripDatabase()..clock = clock.current;
+    final remote = _FailingInviteRemote(
+      database: database,
+      currentUserId: () => 'host',
+    );
+    final repo = _repo(clock: clock, database: database, remote: remote);
+    final trip = await repo.createTrip(_form());
+    remote.failMembers = true;
+    final stale = SyncOp(
+      type: SyncOpType.upsertMember,
+      tripId: trip.id,
+      entityId: 'host',
+    );
+    await repo.local.enqueue(stale);
+
+    final issued = await repo.issueInviteCode(trip.id);
+
+    expect(database.invites[issued.code], isNotNull);
+    expect(
+      (await repo.listInvites(trip.id)).map((invite) => invite.code),
+      contains(issued.code),
+    );
+    expect(
+      (await repo.local.readQueue()).where(
+        (op) => op.type == SyncOpType.upsertMember && op.tripId == trip.id,
+      ),
+      isNotEmpty,
+      reason: '被拒的舊變更留在佇列等之後同步，不會被丟掉',
+    );
+  });
+
+  test('線上建立時伺服器一直沒回應，逾時後不留下旅程', () async {
+    final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
+    final database = MemoryTripDatabase()..clock = clock.current;
+    final remote = _FailingInviteRemote(
+      database: database,
+      currentUserId: () => 'host',
+    )..hangInvites = true;
+    final repo = _repo(
+      clock: clock,
+      database: database,
+      remote: remote,
+      serverWriteTimeout: const Duration(milliseconds: 50),
+    );
+    await expectLater(
+      repo.createTrip(_form()),
+      throwsA(isA<ServerWriteException>()),
+    );
+    expect(await repo.local.readAllTrips(), isEmpty);
+  });
+
+  test('線上產生邀請碼時伺服器一直沒回應，逾時後不顯示新碼', () async {
+    final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
+    final database = MemoryTripDatabase()..clock = clock.current;
+    final remote = _FailingInviteRemote(
+      database: database,
+      currentUserId: () => 'host',
+    );
+    final repo = _repo(
+      clock: clock,
+      database: database,
+      remote: remote,
+      serverWriteTimeout: const Duration(milliseconds: 50),
+    );
+    final trip = await repo.createTrip(_form());
+    final before = await repo.listInvites(trip.id);
+    remote.hangInvites = true;
+    await expectLater(
+      repo.issueInviteCode(trip.id),
+      throwsA(isA<ServerWriteException>()),
+    );
+    expect(
+      (await repo.listInvites(trip.id)).map((invite) => invite.code),
+      before.map((invite) => invite.code),
+    );
+  });
 }
 
 NewTripForm _form() {
@@ -696,6 +776,7 @@ OfflineTripRepository _repo({
   required FixedDeviceClock clock,
   required MemoryTripDatabase database,
   required MemoryTripRemote remote,
+  Duration serverWriteTimeout = const Duration(seconds: 15),
 }) {
   const person = UserAccount(
     id: 'host',
@@ -713,6 +794,7 @@ OfflineTripRepository _repo({
     clock: clock,
     ids: SequentialIdGenerator(),
     connectivity: ConnectivityProbe(isOnline: true),
+    serverWriteTimeout: serverWriteTimeout,
   );
 }
 
@@ -720,11 +802,22 @@ class _FailingInviteRemote extends MemoryTripRemote {
   _FailingInviteRemote({required super.database, required super.currentUserId});
 
   bool failInvites = false;
+  bool failMembers = false;
+
+  /// 模擬 Firestore 斷線時 `set` 排隊、永遠不回應。
+  bool hangInvites = false;
 
   @override
   Future<void> upsertInvite(InviteRecord invite) async {
+    if (hangInvites) return Completer<void>().future;
     if (failInvites) throw TripAccessDenied();
     return super.upsertInvite(invite);
+  }
+
+  @override
+  Future<void> upsertMember(TripMember member) async {
+    if (failMembers) throw TripAccessDenied();
+    return super.upsertMember(member);
   }
 }
 
