@@ -27,4 +27,9 @@ app/.packages
 app/android/.gradle/
 app/android/local.properties
 app/android/app/google-services.json
+# 連線版 APK 的 Firebase 編譯參數（見 app/firebase.local.example.json），不要提交。
+app/firebase.local.json
+# 建好的 APK 放這裡，不進版本庫。
+artifacts/
+*.apk
 app/**/GeneratedPluginRegistrant.*

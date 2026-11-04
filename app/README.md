@@ -10,6 +10,24 @@ flutter test
 
 沒有 `--dart-define=FIREBASE_*` 時走本機帳號與本機旅程，不會連上 Firebase。
 
+## 本機模式與連線版
+
+沒有 Firebase 編譯參數的 APK 是**本機模式**：帳號與旅程只存在這台手機，邀請碼也只在這台手機有效，**其他手機無法用它加入**。加入旅程頁與旅程的邀請碼區會顯示這段說明；找不到碼時也會說明是本機模式的限制，不是碼打錯。
+
+要給多支手機一起用，必須建置**連線版**：
+
+1. 複製 `firebase.local.example.json` 成 `firebase.local.json`，填入 Firebase 主控台的 Android App 設定（`FIREBASE_API_KEY`、`FIREBASE_APP_ID`、`FIREBASE_MESSAGING_SENDER_ID`、`FIREBASE_PROJECT_ID` 必填）。
+2. 把同一個專案的 `google-services.json` 放到 `android/app/`。
+3. 在 `app/` 執行：
+
+   ```powershell
+   pwsh tool/build_online_apk.ps1
+   ```
+
+腳本會先檢查四個必填值都有填（不能是 `REPLACE_` 開頭的範例值）、`google-services.json` 存在且 `project_id` 與 `FIREBASE_PROJECT_ID` 相同、套件名稱是 `com.example.group_trip`，任何一項不符就停下，不會產出本機模式的 APK。檢查通過後用 `--dart-define-from-file` 建置。
+
+`firebase.local.json`、`google-services.json`、`artifacts/` 與 `*.apk` 都在 `.gitignore`，不要提交。
+
 ## Windows 開發環境
 
 將 Flutter SDK 的 `bin` 目錄加入 PATH，並重新開啟終端機。尚未設定 PATH 時，
