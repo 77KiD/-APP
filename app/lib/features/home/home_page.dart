@@ -127,6 +127,7 @@ class _HomePageState extends State<HomePage> {
                 code: code,
               )
             : null,
+        canManage: !deps.isWeb,
       );
       setState(() => _board = board);
       return (board: board, failed: false);

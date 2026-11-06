@@ -73,6 +73,38 @@ void main() {
   Iterable<String> titles(DecisionBoard board, BoardSection section) =>
       board.section(section).map((item) => item.title);
 
+  test('網頁版不列隊長管理的待辦，但待決定的申請仍看得到（ADR 0012 第 2 點）', () {
+    final captain = member('cap', MemberRole.captain);
+    final members = [
+      captain,
+      for (var i = 0; i < 8; i++) member('m$i', MemberRole.member),
+    ];
+    DecisionBoard build({required bool canManage}) => DecisionBoard.build(
+      trip: trip(),
+      self: captain,
+      members: members,
+      requests: [request()],
+      invites: const [],
+      now: now,
+      canManage: canManage,
+    );
+
+    final managed = titles(build(canManage: true), BoardSection.todo);
+    expect(managed, contains(AppStrings.boardReviewRequests(1)));
+    expect(managed, contains(AppStrings.boardAssignVice));
+    expect(managed, contains(AppStrings.boardSetReturn));
+
+    final web = build(canManage: false);
+    final todo = titles(web, BoardSection.todo);
+    expect(todo, isNot(contains(AppStrings.boardReviewRequests(1))));
+    expect(todo, isNot(contains(AppStrings.boardAssignVice)));
+    expect(todo, isNot(contains(AppStrings.boardSetReturn)));
+    expect(
+      titles(web, BoardSection.pending),
+      contains(AppStrings.boardRequests),
+    );
+  });
+
   test('規劃中的隊長獨自一人：待辦排最前，提示設定回程與邀請朋友', () {
     final captain = member('cap', MemberRole.captain);
     final board = DecisionBoard.build(
