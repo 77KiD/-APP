@@ -149,6 +149,12 @@ void main() {
       // 分頁標題和內容也可能用同樣的文字，下排排在最後。
       Finder tabLabel(BottomNavTab tab) => find.text(tab.label).last;
 
+      final slot = find.byKey(const Key('reserved-nav-slot'));
+      // 保留格往上第一個 Container 就是整條下排。
+      final navBar = find
+          .ancestor(of: slot, matching: find.byType(Container))
+          .first;
+
       Map<String, Offset> positions(
         WidgetTester tester,
         BottomNavTab selected,
@@ -158,10 +164,26 @@ void main() {
           if (tab != BottomNavTab.home)
             'label ${tab.name}': tester.getCenter(tabLabel(tab)),
         },
+        'icon 即將推出': tester.getCenter(
+          find.descendant(
+            of: slot,
+            matching: find.byIcon(Icons.hourglass_empty),
+          ),
+        ),
+        'label 即將推出': tester.getCenter(
+          find.descendant(
+            of: slot,
+            matching: find.text(AppStrings.navComingSoon),
+          ),
+        ),
+        // 上下緣都不動，高度才算沒變。
+        'nav 左上': tester.getTopLeft(navBar),
+        'nav 右下': tester.getBottomRight(navBar),
       };
 
       for (final (size, scale) in [
         (const Size(320, 640), 1.0),
+        (const Size(320, 640), 2.0),
         (const Size(412, 915), 1.0),
         (const Size(412, 915), 1.5),
         (const Size(800, 1000), 1.0),
@@ -214,6 +236,38 @@ void main() {
           }
         });
       }
+
+      testWidgets('切換分頁後，即將推出格仍然不能使用', (tester) async {
+        final semantics = tester.ensureSemantics();
+        await tester.pumpWidget(
+          MaterialApp(theme: AppTheme.light(), home: const AppShell()),
+        );
+        await tester.pumpAndSettle();
+
+        for (final tab in [
+          BottomNavTab.itinerary,
+          BottomNavTab.find,
+          BottomNavTab.members,
+        ]) {
+          await tester.tap(tabLabel(tab));
+          await tester.pumpAndSettle();
+
+          final data = tester.getSemantics(slot).getSemanticsData();
+          expect(data.label, AppStrings.navComingSoon, reason: tab.name);
+          expect(
+            data.flagsCollection.isEnabled,
+            Tristate.isFalse,
+            reason: tab.name,
+          );
+          expect(data.hasAction(SemanticsAction.tap), isFalse, reason: tab.name);
+
+          // 按保留格不會換到別的分頁：選到的圖示還在。
+          await tester.tapAt(tester.getCenter(slot));
+          await tester.pumpAndSettle();
+          expect(find.byIcon(tab.selectedIcon), findsOneWidget, reason: tab.name);
+        }
+        semantics.dispose();
+      });
 
       testWidgets('選到的分頁，底色在圖示正中間', (tester) async {
         await tester.pumpWidget(
