@@ -395,6 +395,75 @@ void main() {
     expect(world.share.shared, isEmpty);
   });
 
+  testWidgets('清單載入中按分享，清單先回來也不取消分享或顯示失敗', (tester) async {
+    tallView(tester);
+    final world = await signedIn();
+    final id = await createTrip(world);
+    final reads = _HomeReads(world.trips);
+    await tester.pumpWidget(
+      wrapPage(_withReads(world, reads), const HomePage()),
+    );
+    await tester.pumpAndSettle();
+    final trips = await world.trips.listMyTrips();
+    final trip = await world.trips.getTrip(id);
+    final listGate = Completer<List<Trip>>();
+    final tripGate = Completer<Trip>();
+    reads.readTrips = () => listGate.future;
+    await returnHome(tester);
+    reads.readTrip = (_) => tripGate.future;
+    await tester.tap(find.byKey(const Key('share-board')));
+    await tester.pump();
+
+    listGate.complete(trips);
+    await tester.pump();
+    tripGate.complete(trip);
+    await tester.pumpAndSettle();
+
+    expect(world.share.shared, hasLength(1));
+    expect(find.text(AppStrings.boardRefreshFailed), findsNothing);
+  });
+
+  testWidgets('清單回來後選中的旅程變了，舊分享取消且看板顯示新旅程', (tester) async {
+    tallView(tester);
+    final world = await signedIn();
+    await createTrip(world);
+    final reads = _HomeReads(world.trips);
+    await tester.pumpWidget(
+      wrapPage(_withReads(world, reads), const HomePage()),
+    );
+    await tester.pumpAndSettle();
+    final second = await withSecondTrip(tester, world);
+    final trips = await world.trips.listMyTrips();
+    final remaining = [
+      for (final trip in trips)
+        if (trip.id != second.selected.id) trip,
+    ];
+    final listGate = Completer<List<Trip>>();
+    final tripGate = Completer<Trip>();
+    reads.readTrips = () => listGate.future;
+    await returnHome(tester);
+    reads.readTrip = (id) =>
+        id == second.selected.id ? tripGate.future : world.trips.getTrip(id);
+    await tester.tap(find.byKey(const Key('share-board')));
+    await tester.pump();
+
+    listGate.complete(remaining);
+    await tester.pump();
+    tripGate.complete(second.selected);
+    await tester.pumpAndSettle();
+
+    expect(world.share.shared, isEmpty);
+    expect(find.text(AppStrings.boardRefreshFailed), findsNothing);
+    expect(
+      tester
+          .widget<DecisionBoardView>(find.byType(DecisionBoardView))
+          .board
+          .trip
+          .title,
+      second.otherTitle,
+    );
+  });
+
   testWidgets('本機旅程還是舊的，伺服器已結束時不分享邀請碼', (tester) async {
     tallView(tester);
     final remote = _InviteReads();

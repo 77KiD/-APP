@@ -32,6 +32,9 @@ class _HomePageState extends State<HomePage> {
   int _listSequence = 0;
   int _shareSequence = 0;
 
+  /// 進行中的分享重讀。較早開始的 `_reload` 不可取消它。
+  ({int request, String tripId})? _sharingLoad;
+
   @override
   void initState() {
     super.initState();
@@ -77,6 +80,13 @@ class _HomePageState extends State<HomePage> {
       if (!_isCurrentList(sequence)) return;
       setState(() => _error = error.message);
     }
+    // 清單等待期間使用者按了分享：同一趟旅程的分享會自己更新看板，不要取消它。
+    final sharing = _sharingLoad;
+    if (sharing != null &&
+        sharing.request == _loadSequence &&
+        sharing.tripId == _selectedTrip?.id) {
+      return;
+    }
     await _loadBoard();
   }
 
@@ -104,6 +114,7 @@ class _HomePageState extends State<HomePage> {
     try {
       // 分享前先更新連線狀態，不用畫面上留下的離線判斷讀舊資料。
       if (forSharing) {
+        _sharingLoad = (request: request, tripId: selected.id);
         await deps.connectivity.refresh();
         if (!_isCurrentLoad(request, selected.id)) {
           return (board: null, failed: false, inviteFailed: false);
@@ -155,6 +166,8 @@ class _HomePageState extends State<HomePage> {
         failed: _isCurrentLoad(request, selected.id),
         inviteFailed: false,
       );
+    } finally {
+      if (_sharingLoad?.request == request) _sharingLoad = null;
     }
   }
 

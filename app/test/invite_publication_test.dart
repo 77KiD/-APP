@@ -212,6 +212,61 @@ void main() {
       expect(kept.active, isTrue);
       expect(kept.serverConfirmed, isFalse);
     });
+
+    test('離線產生、尚未發布的碼經過重驗後，仍會在同步時發布', () async {
+      world.connectivity.isOnline = false;
+      final queued = await world.trips.issueInviteCode(trip.id);
+      expect(queued.serverConfirmed, isFalse);
+      expect(world.database.invites[queued.code], isNull);
+      world.connectivity.isOnline = true;
+
+      final result = await world.trips.revalidateInvites(trip.id);
+      expect(
+        result.invites.map((invite) => invite.code),
+        isNot(contains(queued.code)),
+      );
+
+      await world.trips.sync();
+
+      expect(world.database.invites[queued.code]?.active, isTrue);
+      final published = (await world.trips.local.readInvite(queued.code))!;
+      expect(published.active, isTrue);
+      expect(published.serverConfirmed, isTrue);
+    });
+  });
+
+  testWidgets('旅程頁對已失效的碼顯示失效，不能複製，也能產生新碼', (tester) async {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final world = TestWorld();
+    await world.auth.signUp(
+      email: 'captain@example.com',
+      password: 'password1',
+      displayName: '隊長',
+      birthday: '2000-01-01',
+      birthdayConsent: true,
+      today: world.clock.current,
+    );
+    final trip = await world.trips.createTrip(form());
+    world.database.invites.remove(trip.inviteCode);
+    await world.trips.revalidateInvites(trip.id);
+
+    await tester.pumpWidget(
+      wrapPage(world.deps, TripDetailPage(tripId: trip.id)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(AppStrings.inviteInactive(trip.inviteCode)),
+      findsOneWidget,
+    );
+    expect(find.text(AppStrings.copyInviteCode(trip.inviteCode)), findsNothing);
+    final issue = tester.widget<OutlinedButton>(
+      find.byKey(const Key('issue-invite')),
+    );
+    expect(issue.onPressed, isNotNull);
   });
 
   test('recovered network publishes a usable code before reporting success', () async {

@@ -127,6 +127,7 @@ abstract final class AppStrings {
   static const issueInvite = '產生邀請碼';
   static const inviteIssued = '已產生新的邀請碼。較早的邀請碼在各自的 1 小時內仍然有效。';
   static const invitePending = '尚未同步，邀請碼還不能使用。連線後請重新整理或產生新碼。';
+  static String inviteInactive(String code) => '邀請碼 $code 已失效，請產生新碼。';
   static const invalidInviteCode = '請輸入 8–12 碼英文字母或數字的邀請碼';
   static const publicInvite = '公開邀請';
   static const publicInviteHelp =

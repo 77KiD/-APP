@@ -9,7 +9,11 @@ import 'package:group_trip/features/trip/presentation/member_avatar.dart';
 import 'package:group_trip/l10n/app_strings.dart';
 
 class TripDetailPage extends StatefulWidget {
-  const TripDetailPage({required this.tripId, this.embedded = false, super.key});
+  const TripDetailPage({
+    required this.tripId,
+    this.embedded = false,
+    super.key,
+  });
 
   final String tripId;
 
@@ -323,6 +327,8 @@ class _TripDetailPageState extends State<TripDetailPage> {
                 for (final invite in _invites) ...[
                   if (!invite.serverConfirmed)
                     const Text(AppStrings.invitePending)
+                  else if (!invite.active)
+                    Text(AppStrings.inviteInactive(invite.code))
                   else ...[
                     SelectableText(
                       invite.code,
