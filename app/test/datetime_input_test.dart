@@ -170,6 +170,111 @@ void main() {
       });
     });
 
+    group('時間欄也只輸入數字，自動分隔', () {
+      Future<void> pumpTimeField(WidgetTester tester) async {
+        await tester.pumpWidget(
+          buildTestWidget(
+            DateTimeInputField(
+              label: 'Time',
+              controller: controller,
+              isDate: false,
+            ),
+          ),
+        );
+      }
+
+      Future<void> edit(
+        WidgetTester tester, {
+        required String text,
+        required int cursor,
+      }) async {
+        await tester.showKeyboard(find.byType(TextField));
+        tester.testTextInput.updateEditingValue(
+          TextEditingValue(
+            text: text,
+            selection: TextSelection.collapsed(offset: cursor),
+          ),
+        );
+        await tester.pump();
+      }
+
+      testWidgets('鍵盤只給數字，打不出分隔符號', (tester) async {
+        await pumpTimeField(tester);
+
+        final field = tester.widget<TextField>(find.byType(TextField));
+        expect(field.keyboardType, TextInputType.number);
+
+        for (final typed in ['18:30', '18_30', '18-30', '1830']) {
+          await tester.enterText(find.byType(TextField), typed);
+          expect(controller.text, '18:30', reason: typed);
+        }
+        await tester.enterText(find.byType(TextField), ':_- abc');
+        expect(controller.text, isEmpty);
+      });
+
+      testWidgets('逐字輸入時自動補分隔', (tester) async {
+        await pumpTimeField(tester);
+
+        for (final (typed, shown) in [
+          ('1', '1'),
+          ('18', '18'),
+          ('183', '18:3'),
+          ('1830', '18:30'),
+        ]) {
+          await tester.enterText(find.byType(TextField), typed);
+          expect(controller.text, shown);
+          expect(controller.selection.baseOffset, shown.length);
+        }
+      });
+
+      testWidgets('點欄位不會開時鐘，時鐘從圖示開，選的時間會寫進欄位', (tester) async {
+        await pumpTimeField(tester);
+        await tester.enterText(find.byType(TextField), '1830');
+
+        await tester.tap(find.byType(TextField));
+        await tester.pumpAndSettle();
+        expect(find.byType(TimePickerDialog), findsNothing);
+
+        await tester.tap(find.byIcon(Icons.access_time));
+        await tester.pumpAndSettle();
+        expect(find.byType(TimePickerDialog), findsOneWidget);
+
+        await tester.tap(find.text('確定'));
+        await tester.pumpAndSettle();
+        expect(find.byType(TimePickerDialog), findsNothing);
+        expect(controller.text, '18:30');
+
+        await tester.enterText(find.byType(TextField), '0905');
+        expect(controller.text, '09:05');
+      });
+
+      testWidgets('改中間的數字時，游標留在原處', (tester) async {
+        await pumpTimeField(tester);
+        await tester.enterText(find.byType(TextField), '1830');
+
+        // 刪掉分鐘的 3：18:30 → 18:0。游標跟著前一個數字，停在 8 後面。
+        await edit(tester, text: '18:0', cursor: 3);
+
+        expect(controller.text, '18:0');
+        expect(controller.selection.baseOffset, 2);
+
+        // 接著打 5，要補回分鐘的第一碼，游標留在 5 後面。
+        await edit(tester, text: '185:0', cursor: 3);
+
+        expect(controller.text, '18:50');
+        expect(controller.selection.baseOffset, 4);
+      });
+
+      testWidgets('已經填滿時，插入數字不會擠掉最後一碼', (tester) async {
+        await pumpTimeField(tester);
+        await tester.enterText(find.byType(TextField), '1830');
+
+        await edit(tester, text: '199:830', cursor: 2);
+
+        expect(controller.text, '18:30');
+      });
+    });
+
     testWidgets('time field formats digits as user types', (tester) async {
       await tester.pumpWidget(
         buildTestWidget(

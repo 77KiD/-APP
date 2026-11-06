@@ -409,12 +409,12 @@ class _TripDetailPageState extends State<TripDetailPage> {
                     hint: AppStrings.dateHint,
                     helper: AppStrings.dateHelper,
                   ),
-                  LabeledField(
+                  DateTimeInputField(
                     label: AppStrings.returnTime,
                     controller: _returnTime,
                     hint: AppStrings.timeHint,
                     helper: AppStrings.timeHelper,
-                    keyboardType: TextInputType.datetime,
+                    isDate: false,
                   ),
                   FilledButton(
                     onPressed: _busy ? null : _saveReturn,
