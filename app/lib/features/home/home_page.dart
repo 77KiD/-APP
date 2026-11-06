@@ -102,6 +102,13 @@ class _HomePageState extends State<HomePage> {
     }
     final deps = AppScope.of(context);
     try {
+      // 分享前先更新連線狀態，不用畫面上留下的離線判斷讀舊資料。
+      if (forSharing) {
+        await deps.connectivity.refresh();
+        if (!_isCurrentLoad(request, selected.id)) {
+          return (board: null, failed: false, inviteFailed: false);
+        }
+      }
       // 重新讀旅程：公開邀請的截止時間、回程等可能在旅程頁被改過。
       final trip = await deps.trips.getTrip(selected.id);
       if (!_isCurrentLoad(request, selected.id)) {
@@ -189,12 +196,17 @@ class _HomePageState extends State<HomePage> {
     bool requireInvite = false,
   }) async {
     final share = ++_shareSequence;
+    final tripId = _selectedTrip?.id;
     final result = await _loadBoard(forSharing: true);
     // 連按時只處理最後一次，較早的那次不提示。
     if (!mounted || share != _shareSequence) return null;
-    // 被背景載入取代時沒有可分享的資料；要告訴使用者，不能無聲取消。
+    // 被同一趟旅程的背景載入取代時沒有可分享的資料；要告訴使用者，不能無聲取消。
+    // 使用者已切到別的旅程時，原本的分享就此取消，不提示。
     final superseded =
-        result.board == null && !result.failed && _selectedTrip != null;
+        result.board == null &&
+        !result.failed &&
+        tripId != null &&
+        _selectedTrip?.id == tripId;
     if (result.failed ||
         superseded ||
         (requireInvite &&
@@ -205,7 +217,10 @@ class _HomePageState extends State<HomePage> {
           content: const Text(AppStrings.boardRefreshFailed),
           action: SnackBarAction(
             label: AppStrings.boardRetry,
-            onPressed: retry,
+            // 重試只針對原本的旅程，不能變成分享現在選到的另一趟。
+            onPressed: () {
+              if (mounted && _selectedTrip?.id == tripId) retry();
+            },
           ),
         ),
       );

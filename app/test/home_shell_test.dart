@@ -300,6 +300,145 @@ void main() {
     });
   }
 
+  /// 建立第二趟旅程並回傳選到的旅程與另一趟的標題。
+  Future<({Trip selected, String otherTitle})> withSecondTrip(
+    WidgetTester tester,
+    TestWorld world,
+  ) async {
+    await world.trips.createTrip(
+      const NewTripForm(
+        title: '第二趟',
+        startDate: '2026-11-01',
+        endDate: '2026-11-05',
+        timeZone: 'Asia/Taipei',
+        returnDate: '',
+        returnTime: '',
+      ),
+    );
+    await returnHome(tester);
+    final selected = tester
+        .widget<DecisionBoardView>(find.byType(DecisionBoardView))
+        .board
+        .trip;
+    return (
+      selected: selected,
+      otherTitle: selected.title == '第二趟' ? '京都自由行' : '第二趟',
+    );
+  }
+
+  Future<void> switchToTrip(WidgetTester tester, String title) async {
+    await tester.tap(find.text(title).first);
+    await tester.pumpAndSettle();
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pumpAndSettle();
+  }
+
+  for (final fail in [false, true]) {
+    testWidgets('切到別趟旅程後，舊分享${fail ? '失敗' : '完成'}不提示也不分享', (tester) async {
+      tallView(tester);
+      final world = await signedIn();
+      await createTrip(world);
+      final reads = _HomeReads(world.trips);
+      await tester.pumpWidget(
+        wrapPage(_withReads(world, reads), const HomePage()),
+      );
+      await tester.pumpAndSettle();
+      final second = await withSecondTrip(tester, world);
+      final gate = Completer<Trip>();
+      reads.readTrip = (_) => gate.future;
+      await tester.tap(find.byKey(const Key('share-board')));
+      await tester.pumpAndSettle();
+      reads.readTrip = null;
+
+      await switchToTrip(tester, second.otherTitle);
+      if (fail) {
+        gate.completeError(TripException('舊分享失敗'));
+      } else {
+        gate.complete(second.selected);
+      }
+      await tester.pumpAndSettle();
+
+      expect(world.share.shared, isEmpty);
+      expect(find.text(AppStrings.boardRefreshFailed), findsNothing);
+      expect(
+        tester
+            .widget<DecisionBoardView>(find.byType(DecisionBoardView))
+            .board
+            .trip
+            .title,
+        second.otherTitle,
+      );
+    });
+  }
+
+  testWidgets('切到別趟旅程後按舊提示的重試，不會分享另一趟', (tester) async {
+    tallView(tester);
+    final world = await signedIn();
+    await createTrip(world);
+    final reads = _HomeReads(world.trips);
+    await tester.pumpWidget(
+      wrapPage(_withReads(world, reads), const HomePage()),
+    );
+    await tester.pumpAndSettle();
+    final second = await withSecondTrip(tester, world);
+    reads.readTrip = (_) async => throw TripException('讀取失敗');
+    await tester.tap(find.byKey(const Key('share-board')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    final retry = tester.widget<SnackBarAction>(find.byType(SnackBarAction));
+    reads.readTrip = null;
+
+    await switchToTrip(tester, second.otherTitle);
+    retry.onPressed();
+    await tester.pumpAndSettle();
+
+    expect(world.share.shared, isEmpty);
+  });
+
+  testWidgets('本機旅程還是舊的，伺服器已結束時不分享邀請碼', (tester) async {
+    tallView(tester);
+    final remote = _InviteReads();
+    final world = await signedIn(firebase: true, remote: remote);
+    final id = await createTrip(world);
+    final trip = await world.trips.getTrip(id);
+    await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
+    await tester.pumpAndSettle();
+    // 本機比遠端新時 getTrip 會回傳本機版本，看板讀到的仍是未結束的旅程。
+    world.database.trips[id] = trip.copy(
+      status: TripStatus.ended,
+      updatedAt: trip.updatedAt.subtract(const Duration(minutes: 1)),
+    );
+
+    await tester.tap(find.text(AppStrings.boardInviteFriends));
+    await tester.pumpAndSettle();
+    expect(world.share.shared, isEmpty);
+    expect(find.text(AppStrings.boardNoShareableInvite), findsWidgets);
+
+    await tester.tap(find.byKey(const Key('share-board')));
+    await tester.pumpAndSettle();
+    expect(world.share.shared.single, isNot(contains(trip.inviteCode)));
+    expect(world.share.shared.single, isNot(contains('https://')));
+  });
+
+  testWidgets('確認不存在的碼，回首頁後不再出現分享入口', (tester) async {
+    tallView(tester);
+    final remote = _InviteReads();
+    final world = await signedIn(firebase: true, remote: remote);
+    final id = await createTrip(world);
+    final trip = await world.trips.getTrip(id);
+    await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
+    await tester.pumpAndSettle();
+    expect(find.text(AppStrings.boardShareInviteHint), findsOneWidget);
+    world.database.invites.remove(trip.inviteCode);
+
+    await tester.tap(find.text(AppStrings.boardInviteFriends));
+    await tester.pumpAndSettle();
+    expect(find.text(AppStrings.boardShareInviteHint), findsNothing);
+
+    await returnHome(tester);
+    expect(find.text(AppStrings.boardShareInviteHint), findsNothing);
+  });
+
   testWidgets('連按分享只送出一次，也不顯示重試提示', (tester) async {
     tallView(tester);
     final world = await signedIn();

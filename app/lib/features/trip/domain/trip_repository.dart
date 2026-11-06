@@ -18,6 +18,9 @@ abstract class TripRemote {
 
   Future<Trip?> fetchTrip(String id);
 
+  /// 只接受伺服器的結果，不退回裝置快取。需要確認旅程現況時用。
+  Future<Trip?> fetchTripFromServer(String id);
+
   Future<List<Trip>> fetchTripsForUser(String userId);
 
   Future<void> upsertMember(TripMember member);

@@ -112,6 +112,18 @@ class FirestoreTripRemote implements TripRemote {
   }
 
   @override
+  Future<Trip?> fetchTripFromServer(String id) {
+    return _guard(() async {
+      final snap = await _trips
+          .doc(id)
+          .get(const GetOptions(source: Source.server));
+      final data = snap.data();
+      if (data == null) return null;
+      return TripCodec.tripFromMap(_normalize(data), id: id);
+    });
+  }
+
+  @override
   Future<List<Trip>> fetchTripsForUser(String userId) {
     return _guard(() async {
       final refs = await _firestore
