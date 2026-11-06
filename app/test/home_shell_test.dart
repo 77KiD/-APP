@@ -446,6 +446,8 @@ void main() {
     await returnHome(tester);
     reads.readTrip = (_) => tripGate.future;
     remote.fail = true;
+    // 連遠端的讀取此時也會失敗；顯示用的邀請碼不能依賴它。
+    reads.failInviteList = true;
     await tester.tap(find.byKey(const Key('share-board')));
     await tester.pump();
 
@@ -456,6 +458,7 @@ void main() {
 
     expect(world.share.shared.single, contains('2026-11-05 17:00'));
     expect(world.share.shared.single, isNot(contains(original.inviteCode)));
+    expect(find.text(AppStrings.boardRefreshFailed), findsNothing);
     final shown = tester
         .widget<DecisionBoardView>(find.byType(DecisionBoardView))
         .board;
@@ -906,6 +909,7 @@ class _HomeReads implements TripRepository {
   final TripRepository delegate;
   Future<Trip> Function(String)? readTrip;
   Future<List<Trip>> Function()? readTrips;
+  bool failInviteList = false;
 
   @override
   Future<Trip> getTrip(String id) => readTrip?.call(id) ?? delegate.getTrip(id);
@@ -918,7 +922,14 @@ class _HomeReads implements TripRepository {
   Future<List<ModificationRequest>> listRequests(String id) =>
       delegate.listRequests(id);
   @override
-  Future<List<InviteRecord>> listInvites(String id) => delegate.listInvites(id);
+  Future<List<InviteRecord>> listInvites(String id) async {
+    if (failInviteList) throw TripException('讀取失敗');
+    return delegate.listInvites(id);
+  }
+
+  @override
+  Future<List<InviteRecord>> readCachedInvites(String id) =>
+      delegate.readCachedInvites(id);
   @override
   Future<({List<InviteRecord> invites, bool failed})> revalidateInvites(
     String id,

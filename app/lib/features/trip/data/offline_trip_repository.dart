@@ -636,6 +636,10 @@ class OfflineTripRepository implements TripRepository {
   }
 
   @override
+  Future<List<InviteRecord>> readCachedInvites(String tripId) =>
+      local.readInvites(tripId);
+
+  @override
   Future<({List<InviteRecord> invites, bool failed})> revalidateInvites(
     String tripId,
   ) async {

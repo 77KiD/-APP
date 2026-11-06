@@ -134,9 +134,10 @@ class _HomePageState extends State<HomePage> {
           ? await deps.trips.revalidateInvites(trip.id)
           : (invites: await deps.trips.listInvites(trip.id), failed: false);
       // 重驗暫時失敗時，畫面用新的旅程資料與快取的碼，不把它降級成「沒有可分享
-      // 的碼」。分享的內容仍只用通過重驗的碼。
+      // 的碼」。分享的內容仍只用通過重驗的碼。這裡不連遠端，否則補讀失敗會拖垮
+      // 已取得的旅程與重驗結果。
       final displayInvites = validation.failed
-          ? await deps.trips.listInvites(trip.id)
+          ? await deps.trips.readCachedInvites(trip.id)
           : validation.invites;
       final now = await deps.clock.now();
       final selfId = deps.auth.current?.id;
