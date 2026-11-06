@@ -22,6 +22,8 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      # 邀請連結需要專案 ID，沒帶時對應的測試會略過。
+      - run: flutter test test/home_shell_test.dart --dart-define=FIREBASE_PROJECT_ID=share-test
 
   regenerate-goldens:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'cursor/'))

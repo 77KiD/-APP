@@ -59,6 +59,9 @@ class MemoryTripRemote implements TripRemote {
   }
 
   @override
+  Future<Trip?> fetchTripFromServer(String id) => fetchTrip(id);
+
+  @override
   Future<List<Trip>> fetchTripsForUser(String userId) async {
     return [
       for (final trip in database.trips.values)

@@ -18,6 +18,9 @@ abstract class TripRemote {
 
   Future<Trip?> fetchTrip(String id);
 
+  /// 只接受伺服器的結果，不退回裝置快取。需要確認旅程現況時用。
+  Future<Trip?> fetchTripFromServer(String id);
+
   Future<List<Trip>> fetchTripsForUser(String userId);
 
   Future<void> upsertMember(TripMember member);
@@ -96,6 +99,14 @@ abstract class TripRepository {
   Future<Trip> setPublicInvite({required String tripId, required bool enabled});
 
   Future<List<InviteRecord>> listInvites(String tripId);
+
+  /// 只讀本機的邀請碼，不連遠端。僅供畫面顯示，不代表伺服器現況。
+  Future<List<InviteRecord>> readCachedInvites(String tripId);
+
+  /// 分享專用：只回傳本次逐碼向遠端確認的結果，不沿用歷史確認。
+  Future<({List<InviteRecord> invites, bool failed})> revalidateInvites(
+    String tripId,
+  );
 
   Future<void> saveItineraryDay(ItineraryDay day);
 
