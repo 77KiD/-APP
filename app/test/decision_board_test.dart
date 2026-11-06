@@ -367,6 +367,63 @@ void main() {
     );
   });
 
+  group('分享文字不放給自己看的邀請提示（#74）', () {
+    DecisionBoard alone(MemberRole role, List<InviteRecord> invites) {
+      final self = member('self', role);
+      return DecisionBoard.build(
+        trip: trip(expectedReturnAt: DateTime.utc(2026, 11, 5, 10)),
+        self: self,
+        members: [self],
+        requests: const [],
+        invites: invites,
+        now: now,
+      );
+    }
+
+    test('沒有可分享的碼：畫面仍有提示，文字沒有', () {
+      final board = alone(MemberRole.captain, const []);
+
+      final onScreen = board
+          .section(BoardSection.todo)
+          .firstWhere((item) => item.title == AppStrings.boardInviteFriends);
+      expect(onScreen.detail, AppStrings.boardNoShareableInvite);
+
+      final text = board.shareText();
+      expect(text, isNot(contains(AppStrings.boardInviteFriends)));
+      expect(text, isNot(contains(AppStrings.boardNoShareableInvite)));
+    });
+
+    test('有可分享的碼：文字沒有操作提示，邀請碼照常附上', () {
+      final text = alone(MemberRole.captain, [invite()]).shareText();
+
+      expect(text, isNot(contains(AppStrings.boardInviteFriends)));
+      expect(text, isNot(contains(AppStrings.boardShareInviteHint)));
+      expect(text, contains(AppStrings.boardShareInviteLine('CODE0001')));
+    });
+
+    test('待辦只剩這一項時，文字不留空的區塊標題', () {
+      final board = alone(MemberRole.member, const []);
+
+      expect(board.section(BoardSection.todo), hasLength(1));
+      expect(board.shareText(), isNot(contains(AppStrings.boardTodo)));
+    });
+
+    test('其他待辦照常出現在文字裡', () {
+      final self = member('cap', MemberRole.captain);
+      final text = DecisionBoard.build(
+        trip: trip(),
+        self: self,
+        members: [self],
+        requests: const [],
+        invites: const [],
+        now: now,
+      ).shareText();
+
+      expect(text, contains('【${AppStrings.boardTodo}】'));
+      expect(text, contains(AppStrings.boardSetReturn));
+    });
+  });
+
   test('重算後的邀請分享含最新資料與 inviteUrlFor 產生的連結', () {
     final captain = member('cap', MemberRole.captain);
     final freshInvite = invite(code: 'NEWCODE1', createdAt: now);
