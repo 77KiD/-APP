@@ -54,6 +54,42 @@ class LocalAuthRepository implements AuthRepository {
     );
   }
 
+  @override
+  Future<SignUpOutcome> signUpGuest({
+    required String displayName,
+    required String birthday,
+    required bool birthdayConsent,
+    required DateTime today,
+  }) {
+    return SignUpFlow(create: _createGuest).runGuest(
+      displayName: displayName,
+      birthday: birthday,
+      birthdayConsent: birthdayConsent,
+      today: today,
+    );
+  }
+
+  /// 本機的訪客帳號：沒有 email 與密碼，只能用這台裝置的工作階段登入。
+  Future<UserAccount> _createGuest(AcceptedSignUp request) async {
+    final account = UserAccount(
+      id: ids.next(),
+      email: '',
+      displayName: request.displayName,
+      birthday: request.birthday,
+      consentDecided: false,
+      analyticsConsent: false,
+      crashlyticsConsent: false,
+    );
+    await store.transaction((draft) {
+      final users = _users(draft);
+      users[account.id] = account.toDeviceMap();
+      draft[FirestoreSchema.users] = users;
+      draft[LocalOnlyFields.sessionUserId] = account.id;
+    });
+    _emit(account);
+    return account;
+  }
+
   Future<UserAccount> _create(AcceptedSignUp request) async {
     final existing = await _findByEmail(request.email);
     if (existing != null) throw const EmailInUseFailure();

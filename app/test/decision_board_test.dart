@@ -303,7 +303,7 @@ void main() {
       lessThan(text.indexOf(AppStrings.boardDecided)),
     );
     expect(
-      DecisionBoard.inviteShareText(board.trip, board.shareableInvite!),
+      board.inviteShareText(board.shareableInvite!),
       AppStrings.inviteShareText('京都自由行', 'CODE0001'),
     );
   });

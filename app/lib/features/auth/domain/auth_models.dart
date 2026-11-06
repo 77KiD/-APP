@@ -14,6 +14,9 @@ class UserAccount {
   });
 
   final String id;
+
+  /// 網頁訪客（ADR 0012 第 4 點）：匿名帳號，沒有 email。
+  bool get isGuest => email.isEmpty;
   final String email;
   final String displayName;
   final String? photoUrl;
@@ -183,6 +186,14 @@ abstract class AuthRepository {
   Future<SignInOutcome> signIn({
     required String email,
     required String password,
+  });
+
+  /// 網頁訪客的輕量註冊：匿名帳號＋顯示名稱與生日，13 歲門檻照常檢查。
+  Future<SignUpOutcome> signUpGuest({
+    required String displayName,
+    required String birthday,
+    required bool birthdayConsent,
+    required DateTime today,
   });
 
   Future<void> signOut();

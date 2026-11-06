@@ -63,6 +63,57 @@ class FirebaseAuthRepository implements AuthRepository {
     );
   }
 
+  @override
+  Future<SignUpOutcome> signUpGuest({
+    required String displayName,
+    required String birthday,
+    required bool birthdayConsent,
+    required DateTime today,
+  }) {
+    return SignUpFlow(create: _createGuest).runGuest(
+      displayName: displayName,
+      birthday: birthday,
+      birthdayConsent: birthdayConsent,
+      today: today,
+    );
+  }
+
+  /// ADR 0012 第 4 點：匿名登入後寫 users/{uid}，所以 registered() 與
+  /// 13 歲門檻照常由規則檢查。寫入失敗就刪掉剛建立的匿名帳號。
+  Future<UserAccount> _createGuest(AcceptedSignUp request) async {
+    final UserCredential credential;
+    try {
+      credential = await _auth.signInAnonymously();
+    } on FirebaseAuthException {
+      throw const ProfileWriteFailure();
+    }
+    final user = credential.user;
+    if (user == null) throw const MissingProfileFailure();
+    final account = UserAccount(
+      id: user.uid,
+      email: '',
+      displayName: request.displayName,
+      birthday: request.birthday,
+      consentDecided: false,
+      analyticsConsent: false,
+      crashlyticsConsent: false,
+    );
+    try {
+      await _users.doc(account.id).set({
+        FirestoreSchema.birthdate: _utcMidnight(account.birthday),
+        FirestoreSchema.displayName: account.displayName,
+        FirestoreSchema.photoUrl: account.photoUrl,
+        FirestoreSchema.createdAt: FieldValue.serverTimestamp(),
+        FirestoreSchema.updatedAt: FieldValue.serverTimestamp(),
+      });
+    } on FirebaseException {
+      await _discard(user);
+      throw const ProfileWriteFailure();
+    }
+    _emit(account);
+    return account;
+  }
+
   Future<UserAccount> _create(AcceptedSignUp request) async {
     try {
       final credential = await _auth.createUserWithEmailAndPassword(
@@ -112,7 +163,9 @@ class FirebaseAuthRepository implements AuthRepository {
         password: password,
       );
       final user = credential.user;
-      if (user == null) return const SignInOutcome.failure(WrongCredentialsFailure());
+      if (user == null) {
+        return const SignInOutcome.failure(WrongCredentialsFailure());
+      }
       final account = await _load(user.uid);
       if (account == null) {
         return const SignInOutcome.failure(MissingProfileFailure());

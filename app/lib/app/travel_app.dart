@@ -47,7 +47,9 @@ class RootPage extends StatelessWidget {
       initialData: auth.current,
       builder: (context, snapshot) {
         final account = snapshot.data;
-        if (account == null) return const UnauthenticatedPage();
+        if (account == null) {
+          return UnauthenticatedPage(preferGuest: AppScope.of(context).isWeb);
+        }
         if (!account.consentDecided) return const ConsentPage();
         return const HomePage();
       },
