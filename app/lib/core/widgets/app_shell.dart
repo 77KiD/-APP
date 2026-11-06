@@ -392,7 +392,7 @@ class _AppBottomNav extends StatelessWidget {
       padding: EdgeInsets.fromLTRB(6, 6, 6, bottomPadding + 22),
       child: Row(
         children: [
-          for (final tab in BottomNavTab.values)
+          for (final tab in BottomNavTab.values) ...[
             Expanded(
               child: _NavButton(
                 tab: tab,
@@ -403,6 +403,10 @@ class _AppBottomNav extends StatelessWidget {
                     : 0,
               ),
             ),
+            // 首頁右邊保留一格給之後的新功能，首頁才會在正中間（ADR 0011 第 1 點）。
+            if (tab == BottomNavTab.home)
+              const Expanded(child: SizedBox(key: Key('reserved-nav-slot'))),
+          ],
         ],
       ),
     );

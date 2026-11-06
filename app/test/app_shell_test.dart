@@ -34,6 +34,93 @@ void main() {
       expect(find.byIcon(Icons.chat_bubble_outline), findsNothing);
     });
 
+    group('下排保留原本的通訊位置', () {
+      Future<void> pumpShell(
+        WidgetTester tester,
+        Size size, {
+        double textScale = 1,
+      }) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.light(),
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(textScale)),
+              child: child!,
+            ),
+            home: const AppShell(),
+          ),
+        );
+        await tester.pump();
+      }
+
+      final slot = find.byKey(const Key('reserved-nav-slot'));
+
+      for (final (size, scale) in [
+        (const Size(320, 640), 1.0),
+        (const Size(412, 915), 1.0),
+        (const Size(412, 915), 1.5),
+        (const Size(800, 1000), 1.0),
+      ]) {
+        testWidgets('首頁在正中間：${size.width.toInt()} 寬，文字 $scale 倍', (
+          tester,
+        ) async {
+          await pumpShell(tester, size, textScale: scale);
+
+          expect(
+            tester.getCenter(find.byIcon(Icons.home)).dx,
+            closeTo(size.width / 2, 0.5),
+          );
+        });
+      }
+
+      testWidgets('順序是行程、找人、首頁、保留格、成員', (tester) async {
+        await pumpShell(tester, const Size(412, 915));
+
+        final centers = [
+          find.byIcon(Icons.route_outlined),
+          find.byIcon(Icons.explore_outlined),
+          find.byIcon(Icons.home),
+          slot,
+          find.byIcon(Icons.people_outline),
+        ].map((finder) => tester.getCenter(finder).dx).toList();
+
+        expect(centers, orderedEquals([...centers]..sort()));
+        // 五格等寬：相鄰兩格的間距都一樣。
+        final gap = centers[1] - centers[0];
+        for (var i = 2; i < centers.length; i++) {
+          expect(centers[i] - centers[i - 1], closeTo(gap, 0.5));
+        }
+      });
+
+      testWidgets('保留格是空的：沒有內容，按了也不會切換分頁', (tester) async {
+        await pumpShell(tester, const Size(412, 915));
+
+        expect(
+          find.descendant(of: slot, matching: find.byType(Text)),
+          findsNothing,
+        );
+        expect(
+          find.descendant(of: slot, matching: find.byType(Icon)),
+          findsNothing,
+        );
+        expect(
+          find.descendant(of: slot, matching: find.byType(InkWell)),
+          findsNothing,
+        );
+        expect(BottomNavTab.values, hasLength(4));
+
+        await tester.tapAt(tester.getCenter(slot));
+        await tester.pump();
+        expect(find.text('首頁'), findsNWidgets(2));
+      });
+    });
+
     testWidgets('members badge shows approval count for leader',
         (WidgetTester tester) async {
       await tester.pumpWidget(
