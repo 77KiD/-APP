@@ -88,10 +88,13 @@ class DecisionBoard {
     required List<InviteRecord> invites,
     required DateTime now,
     String? Function(String code)? inviteUrlFor,
+
+    /// 網頁版不能做隊長管理（ADR 0012 第 2 點），不列點進去也做不了的待辦。
+    bool canManage = true,
   }) {
     final items = <BoardItem>[];
     final role = self?.role ?? MemberRole.member;
-    final manager = role.canEditExpectedReturnDirectly;
+    final manager = canManage && role.canEditExpectedReturnDirectly;
 
     // 已決定
     items.add(
@@ -162,7 +165,8 @@ class DecisionBoard {
           ),
         );
       }
-      if (role == MemberRole.captain &&
+      if (canManage &&
+          role == MemberRole.captain &&
           TripPolicy.viceCaptainRequiredToStart(members.length) &&
           !members.any((member) => member.role == MemberRole.viceCaptain)) {
         items.add(

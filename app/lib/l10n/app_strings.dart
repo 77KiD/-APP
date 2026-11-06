@@ -84,6 +84,8 @@ abstract final class AppStrings {
   static const guestHasAccount = '已經有帳號，用 email 登入';
   static const webCreateInApp = '建立旅程請使用 App。網頁版可以加入旅程、看行程與投票。';
   static const webFindInApp = '找人需要手機的定位，請使用 App。';
+  static const webManageInApp =
+      '審核修改申請、設定回程時間、公開邀請與指定副隊長，請使用 App。下載 App 也能在走散時用定位找人。';
   static String inviteLinkLine(String url) => '網頁直接加入：$url';
   static const findComingSoon = '找人地圖在之後的版本推出。現在可以在旅程頁看成員與預計回程時間。';
   static const emptyTrips = '還沒有旅程。建立一趟旅程，或用邀請碼加入朋友的旅程。';

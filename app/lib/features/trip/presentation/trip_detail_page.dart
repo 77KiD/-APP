@@ -281,6 +281,10 @@ class _TripDetailPageState extends State<TripDetailPage> {
   @override
   Widget build(BuildContext context) {
     final trip = _trip;
+    // 隊長管理留在 App（ADR 0012 第 2 點）。一般成員的修改申請與發碼不受影響。
+    final isWeb = AppScope.of(context).isWeb;
+    final isLeader = _self?.role.canEditExpectedReturnDirectly ?? false;
+    final manageInApp = isWeb && isLeader;
     return Scaffold(
       appBar: AppBar(
         primary: !widget.embedded,
@@ -316,7 +320,7 @@ class _TripDetailPageState extends State<TripDetailPage> {
                     AppStrings.localModeInviteNotice,
                     key: Key('local-mode-invite-notice'),
                   ),
-                if (TripPolicy.canTogglePublicInvite(_self?.role))
+                if (!isWeb && TripPolicy.canTogglePublicInvite(_self?.role))
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text(AppStrings.publicInvite),
@@ -369,54 +373,64 @@ class _TripDetailPageState extends State<TripDetailPage> {
                 if (_notice != null)
                   Semantics(liveRegion: true, child: Text(_notice!)),
                 const PageHeading(AppStrings.members),
-                if (_members.length <= 4 && _self?.role == MemberRole.captain)
-                  const Text(AppStrings.noViceSmallGroup),
-                if (_members.length >= 5 && _members.length <= 7)
-                  const Text(AppStrings.viceOptional),
-                if (TripPolicy.viceCaptainRequiredToStart(_members.length) &&
-                    !_members.any(
-                      (member) => member.role == MemberRole.viceCaptain,
-                    ))
-                  const Text(AppStrings.viceRequired),
+                if (!isWeb) ...[
+                  if (_members.length <= 4 && _self?.role == MemberRole.captain)
+                    const Text(AppStrings.noViceSmallGroup),
+                  if (_members.length >= 5 && _members.length <= 7)
+                    const Text(AppStrings.viceOptional),
+                  if (TripPolicy.viceCaptainRequiredToStart(_members.length) &&
+                      !_members.any(
+                        (member) => member.role == MemberRole.viceCaptain,
+                      ))
+                    const Text(AppStrings.viceRequired),
+                ],
                 for (final member in _members)
                   _MemberTile(
                     member: member,
                     canAssign:
+                        !isWeb &&
                         !_busy &&
                         _self?.role == MemberRole.captain &&
                         TripPolicy.canAssignViceCaptain(_members.length) &&
                         member.role == MemberRole.member,
                     onAssign: () => _assign(member),
                   ),
-                const PageHeading(AppStrings.expectedReturn),
-                LabeledField(
-                  label: AppStrings.returnDate,
-                  controller: _returnDate,
-                  hint: AppStrings.dateHint,
-                  helper: AppStrings.dateHelper,
-                  keyboardType: TextInputType.datetime,
-                ),
-                LabeledField(
-                  label: AppStrings.returnTime,
-                  controller: _returnTime,
-                  hint: AppStrings.timeHint,
-                  helper: AppStrings.timeHelper,
-                  keyboardType: TextInputType.datetime,
-                ),
-                FilledButton(
-                  onPressed: _busy ? null : _saveReturn,
-                  child: Text(
-                    _self?.role.canEditExpectedReturnDirectly ?? false
-                        ? AppStrings.saveExpectedReturn
-                        : AppStrings.submitReturnRequest,
+                if (manageInApp)
+                  const Text(
+                    AppStrings.webManageInApp,
+                    key: Key('web-manage-in-app'),
+                  )
+                else ...[
+                  const PageHeading(AppStrings.expectedReturn),
+                  LabeledField(
+                    label: AppStrings.returnDate,
+                    controller: _returnDate,
+                    hint: AppStrings.dateHint,
+                    helper: AppStrings.dateHelper,
+                    keyboardType: TextInputType.datetime,
                   ),
-                ),
-                if (_self?.role.canEditExpectedReturnDirectly ?? false)
+                  LabeledField(
+                    label: AppStrings.returnTime,
+                    controller: _returnTime,
+                    hint: AppStrings.timeHint,
+                    helper: AppStrings.timeHelper,
+                    keyboardType: TextInputType.datetime,
+                  ),
+                  FilledButton(
+                    onPressed: _busy ? null : _saveReturn,
+                    child: Text(
+                      isLeader
+                          ? AppStrings.saveExpectedReturn
+                          : AppStrings.submitReturnRequest,
+                    ),
+                  ),
+                ],
+                if (isLeader && !isWeb)
                   OutlinedButton(
                     onPressed: _busy ? null : _clearReturn,
                     child: const Text(AppStrings.clearExpectedReturn),
                   ),
-                if (_self?.role.canEditExpectedReturnDirectly ?? false) ...[
+                if (isLeader && !isWeb) ...[
                   const PageHeading(AppStrings.pendingRequests),
                   for (final request in _requests)
                     if (request.status == RequestStatus.pending)

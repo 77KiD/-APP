@@ -162,6 +162,7 @@ class _HomePageState extends State<HomePage> {
                     code: code,
                   )
                 : null,
+            canManage: !deps.isWeb,
           );
       final board = buildWith(validation.invites);
       final display = validation.failed ? buildWith(displayInvites) : board;
