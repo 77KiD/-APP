@@ -556,21 +556,21 @@ class _NavButton extends StatelessWidget {
     );
 
     if (isSelected && !isHome) {
+      // 選到時只多一層底色，圖示和文字不能動，所以要和未選取時一樣置中。
       button = Stack(
+        alignment: Alignment.topCenter,
         clipBehavior: Clip.none,
         children: [
           Positioned(
-            top: 2,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Container(
-                width: 44,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: colors.primary.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(15),
-                ),
+            // 底色高 30、圖示高 24，上下各多 3，正好對準圖示。
+            top: -3,
+            child: Container(
+              key: const Key('nav-selected-pill'),
+              width: 44,
+              height: 30,
+              decoration: BoxDecoration(
+                color: colors.primary.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(15),
               ),
             ),
           ),
