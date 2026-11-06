@@ -110,6 +110,24 @@ void main() {
         expect(find.byType(DatePickerDialog), findsOneWidget);
       });
 
+      testWidgets('用日曆選的日期會寫進欄位，之後還能打字修改', (tester) async {
+        await pumpDateField(tester);
+        await tester.enterText(find.byType(TextField), '20260315');
+
+        await tester.tap(find.byIcon(Icons.calendar_today));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('20'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('確定'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(DatePickerDialog), findsNothing);
+        expect(controller.text, '2026-03-20');
+
+        await tester.enterText(find.byType(TextField), '20260401');
+        expect(controller.text, '2026-04-01');
+      });
+
       testWidgets('改中間的數字時，游標留在原處', (tester) async {
         await pumpDateField(tester);
         await tester.enterText(find.byType(TextField), '20260315');
