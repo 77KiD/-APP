@@ -67,6 +67,8 @@ abstract final class AppStrings {
   static const boardInviteFriends = '邀請朋友加入';
   static const boardNoShareableInvite = '到旅程頁產生邀請碼，伺服器確認後就能分享';
   static const boardShareInviteHint = '點這裡把邀請碼分享到 LINE';
+  static const boardRefreshFailed = '無法更新看板，請重試後再分享';
+  static const boardRetry = '重試';
   static const boardShare = '分享看板到 LINE';
   static const boardShareInvite = '分享邀請碼到 LINE';
   static String boardShareTitle(String tripTitle) => '「$tripTitle」決定看板';
@@ -83,8 +85,7 @@ abstract final class AppStrings {
   static const webCreateInApp = '建立旅程請使用 App。網頁版可以加入旅程、看行程與投票。';
   static const webFindInApp = '找人需要手機的定位，請使用 App。';
   static String inviteLinkLine(String url) => '網頁直接加入：$url';
-  static const findComingSoon =
-      '找人地圖在之後的版本推出。現在可以在旅程頁看成員與預計回程時間。';
+  static const findComingSoon = '找人地圖在之後的版本推出。現在可以在旅程頁看成員與預計回程時間。';
   static const emptyTrips = '還沒有旅程。建立一趟旅程，或用邀請碼加入朋友的旅程。';
   static const createTrip = '建立旅程';
   static const joinTrip = '用邀請碼加入';
