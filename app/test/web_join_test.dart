@@ -275,6 +275,29 @@ void main() {
       expect(find.text(AppStrings.boardReviewRequests(1)), findsNothing);
       expect(find.text(AppStrings.boardRequests), findsOneWidget);
     });
+
+    testWidgets('網頁版分享看板重算後，畫面與文字都不列管理待辦', (tester) async {
+      tester.view.physicalSize = const Size(800, 3200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final setup = await tripAs(MemberRole.captain, web: true);
+      await tester.pumpWidget(wrapPage(setup.world.deps, const HomePage()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('share-board')));
+      await tester.pumpAndSettle();
+
+      final shared = setup.world.share.shared.single;
+      for (final todo in [
+        AppStrings.boardSetReturn,
+        AppStrings.boardAssignVice,
+        AppStrings.boardReviewRequests(1),
+      ]) {
+        expect(find.text(todo), findsNothing);
+        expect(shared, isNot(contains(todo)));
+      }
+    });
   });
 
   test('KeyValueDocumentStore 存成一個字串，壞掉的資料不擋開啟', () async {

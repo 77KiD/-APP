@@ -636,6 +636,87 @@ class OfflineTripRepository implements TripRepository {
   }
 
   @override
+  Future<List<InviteRecord>> readCachedInvites(String tripId) =>
+      local.readInvites(tripId);
+
+  @override
+  Future<({List<InviteRecord> invites, bool failed})> revalidateInvites(
+    String tripId,
+  ) async {
+    final known = await local.readInvites(tripId);
+    final invites = <InviteRecord>[];
+    var failed = false;
+    try {
+      await connectivity.refresh();
+      if (!connectivity.isOnline) return (invites: invites, failed: true);
+    } on Exception {
+      return (invites: invites, failed: true);
+    }
+    // 邀請文件可能仍是 active，但旅程已結束或公開邀請已關閉。本機的旅程可能還是
+    // 舊的（待同步、離線時載入），所以這裡要看伺服器的旅程。
+    final Trip? serverTrip;
+    try {
+      serverTrip = await remote
+          .fetchTripFromServer(tripId)
+          .timeout(serverWriteTimeout);
+    } on Exception {
+      return (invites: invites, failed: true);
+    }
+    if (serverTrip == null) return (invites: invites, failed: true);
+    await Future.wait([
+      for (final cached in known)
+        () async {
+          try {
+            final fresh = await remote
+                .fetchInvite(cached.code)
+                .timeout(serverWriteTimeout);
+            if (fresh == null || fresh.tripId != tripId) {
+              // 曾確認的碼已不存在，下次一般載入不該再出現分享入口。尚未發布的
+              // 本機碼查不到是正常的，要留著等同步。
+              if (cached.serverConfirmed) {
+                await local.saveInvite(_withoutUse(cached));
+              }
+              return;
+            }
+            final confirmed = fresh.withServerConfirmation(true);
+            // 停用狀態也必須寫回快取。
+            await local.saveInvite(confirmed);
+            invites.add(confirmed);
+          } on Exception {
+            failed = true;
+          }
+        }(),
+    ]);
+    if (serverTrip.status == TripStatus.ended) {
+      return (invites: const <InviteRecord>[], failed: failed);
+    }
+    return (
+      invites: [
+        for (final invite in invites)
+          if (!TripPolicy.memberInviteBlocked(
+            invitesResetAt: serverTrip.invitesResetAt,
+            issuerRole: invite.issuerRole,
+            createdAt: invite.createdAt,
+          ))
+            invite,
+      ],
+      failed: failed,
+    );
+  }
+
+  InviteRecord _withoutUse(InviteRecord invite) => InviteRecord(
+    code: invite.code,
+    tripId: invite.tripId,
+    createdBy: invite.createdBy,
+    issuerRole: invite.issuerRole,
+    tripTitle: invite.tripTitle,
+    active: false,
+    serverConfirmed: invite.serverConfirmed,
+    createdAt: invite.createdAt,
+    expiresAt: invite.expiresAt,
+  );
+
+  @override
   Future<void> saveItineraryDay(ItineraryDay day) async {
     await getTrip(day.tripId);
     final now = await _stamp();

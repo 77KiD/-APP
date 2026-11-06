@@ -112,6 +112,22 @@ class FirestoreTripRemote implements TripRemote {
   }
 
   @override
+  Future<Trip?> fetchTripFromServer(String id) {
+    return _guard(() async {
+      final snap = await _trips
+          .doc(id)
+          .get(const GetOptions(source: Source.server));
+      // 伺服器讀取仍可能合併本機尚未確認的寫入，那就不算伺服器確認。
+      if (snap.metadata.hasPendingWrites || snap.metadata.isFromCache) {
+        throw TripException('無法向伺服器確認旅程');
+      }
+      final data = snap.data();
+      if (data == null) return null;
+      return TripCodec.tripFromMap(_normalize(data), id: id);
+    });
+  }
+
+  @override
   Future<List<Trip>> fetchTripsForUser(String userId) {
     return _guard(() async {
       final refs = await _firestore

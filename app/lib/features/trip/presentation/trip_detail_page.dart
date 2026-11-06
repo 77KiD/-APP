@@ -331,6 +331,8 @@ class _TripDetailPageState extends State<TripDetailPage> {
                 for (final invite in _invites) ...[
                   if (!invite.serverConfirmed)
                     const Text(AppStrings.invitePending)
+                  else if (!invite.active)
+                    Text(AppStrings.inviteInactive(invite.code))
                   else ...[
                     SelectableText(
                       invite.code,

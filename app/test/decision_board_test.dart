@@ -105,6 +105,33 @@ void main() {
     );
   });
 
+  test('已結束旅程與其他旅程的碼不能分享', () {
+    expect(
+      DecisionBoard.shareableInviteFor(
+        trip: trip(status: TripStatus.ended),
+        invites: [invite()],
+        now: now,
+      ),
+      isNull,
+    );
+    final other = InviteRecord(
+      code: 'OTHER001',
+      tripId: 'other',
+      createdBy: 'cap',
+      createdAt: now,
+      expiresAt: now.add(const Duration(hours: 1)),
+      serverConfirmed: true,
+    );
+    expect(
+      DecisionBoard.shareableInviteFor(
+        trip: trip(),
+        invites: [other],
+        now: now,
+      ),
+      isNull,
+    );
+  });
+
   test('規劃中的隊長獨自一人：待辦排最前，提示設定回程與邀請朋友', () {
     final captain = member('cap', MemberRole.captain);
     final board = DecisionBoard.build(

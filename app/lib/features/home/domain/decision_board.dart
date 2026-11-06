@@ -231,7 +231,9 @@ class DecisionBoard {
     required DateTime now,
   }) {
     InviteRecord? best;
+    if (trip.status == TripStatus.ended) return null;
     for (final invite in invites) {
+      if (invite.tripId != trip.id) continue;
       if (!invite.serverConfirmed || !invite.active) continue;
       if (TripPolicy.memberInviteBlocked(
         invitesResetAt: trip.invitesResetAt,
