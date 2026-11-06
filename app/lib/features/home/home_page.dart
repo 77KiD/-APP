@@ -218,6 +218,8 @@ class _HomePageState extends State<HomePage> {
   }) async {
     final share = ++_shareSequence;
     final tripId = _selectedTrip?.id;
+    // 這次分享開始後，上一次的失敗提示就過時了。
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     final result = await _loadBoard(forSharing: true);
     // 連按時只處理最後一次，較早的那次不提示。
     if (!mounted || share != _shareSequence) return null;
@@ -236,6 +238,9 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(AppStrings.boardRefreshFailed),
+          // 帶動作的提示預設不會消失；分享入口還在，不需要一直留著。
+          persist: false,
+          duration: const Duration(seconds: 8),
           action: SnackBarAction(
             label: AppStrings.boardRetry,
             // 重試只針對原本的旅程，不能變成分享現在選到的另一趟。

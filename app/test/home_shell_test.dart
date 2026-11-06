@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:group_trip/app/app_dependencies.dart';
 import 'package:group_trip/core/firebase/firebase_config.dart';
+import 'package:group_trip/core/theme/app_theme.dart';
 import 'package:group_trip/features/trip/domain/invite_link.dart';
 import 'package:group_trip/features/trip/data/memory_trip_remote.dart';
 import 'package:group_trip/features/home/presentation/decision_board_view.dart';
@@ -250,6 +251,83 @@ void main() {
       expect(world.share.shared, hasLength(1));
     });
   }
+
+  group('分享失敗的提示', () {
+    double contrast(Color a, Color b) {
+      final la = a.computeLuminance();
+      final lb = b.computeLuminance();
+      final lighter = la > lb ? la : lb;
+      final darker = la > lb ? lb : la;
+      return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    Future<({TestWorld world, _HomeReads reads})> failedShare(
+      WidgetTester tester,
+    ) async {
+      tallView(tester);
+      final world = await signedIn();
+      await createTrip(world);
+      final reads = _HomeReads(world.trips);
+      await tester.pumpWidget(
+        wrapPage(_withReads(world, reads), const HomePage()),
+      );
+      await tester.pumpAndSettle();
+      reads.readTrip = (_) async => throw TripException('讀取失敗');
+      await tester.tap(find.byKey(const Key('share-board')));
+      await tester.pumpAndSettle();
+      expect(find.text(AppStrings.boardRefreshFailed), findsOneWidget);
+      return (world: world, reads: reads);
+    }
+
+    test('兩個主題的「重試」都看得清楚', () {
+      for (final theme in [AppTheme.light(), AppTheme.dark()]) {
+        expect(
+          contrast(
+            theme.snackBarTheme.actionTextColor!,
+            theme.colorScheme.inverseSurface,
+          ),
+          greaterThanOrEqualTo(4.5),
+        );
+      }
+    });
+
+    testWidgets('畫面上的「重試」實際用了看得清楚的顏色', (tester) async {
+      await failedShare(tester);
+
+      final button = tester.widget<TextButton>(
+        find.descendant(
+          of: find.byType(SnackBarAction),
+          matching: find.byType(TextButton),
+        ),
+      );
+      final text = button.style!.foregroundColor!.resolve(<WidgetState>{})!;
+      final context = tester.element(find.byType(SnackBar));
+      expect(
+        contrast(text, Theme.of(context).colorScheme.inverseSurface),
+        greaterThanOrEqualTo(4.5),
+      );
+    });
+
+    testWidgets('提示會自動消失', (tester) async {
+      await failedShare(tester);
+
+      await tester.pump(const Duration(seconds: 9));
+      await tester.pumpAndSettle();
+
+      expect(find.text(AppStrings.boardRefreshFailed), findsNothing);
+    });
+
+    testWidgets('下一次分享開始就收掉舊提示', (tester) async {
+      final setup = await failedShare(tester);
+      setup.reads.readTrip = null;
+
+      await tester.tap(find.byKey(const Key('share-board')));
+      await tester.pumpAndSettle();
+
+      expect(setup.world.share.shared, hasLength(1));
+      expect(find.text(AppStrings.boardRefreshFailed), findsNothing);
+    });
+  });
 
   Future<void> returnHome(WidgetTester tester) async {
     await tester.tap(find.byIcon(Icons.explore_outlined));
