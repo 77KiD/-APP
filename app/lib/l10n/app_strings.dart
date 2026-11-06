@@ -8,8 +8,8 @@ abstract final class AppStrings {
   static const password = '密碼';
   static const displayName = '顯示名稱';
   static const birthday = '出生日期';
-  static const dateHint = 'YYYY-MM-DD';
-  static const dateHelper = '用鍵盤輸入，格式 YYYY-MM-DD';
+  static const dateHint = 'YYYYMMDD';
+  static const dateHelper = '只要輸入數字，例如 20261105，會自動分隔';
   static const timeHint = 'HH:mm';
   static const timeHelper = '24 小時制，例如 18:30';
   static const birthdayPurpose =
@@ -27,7 +27,7 @@ abstract final class AppStrings {
   static const weakPassword = '密碼至少需要 8 個字元';
   static const emptyName = '請輸入顯示名稱';
   static const nameTooLong = '顯示名稱最多 40 個字';
-  static const invalidDate = '請用 YYYY-MM-DD 輸入日期';
+  static const invalidDate = '請輸入完整的日期，例如 20261105';
   static const emailInUse = '這個電子郵件已經註冊';
   static const wrongCredentials = '電子郵件或密碼不正確';
   static const missingProfile = '找不到這個帳號的個人資料';
