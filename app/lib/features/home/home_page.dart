@@ -29,6 +29,8 @@ class _HomePageState extends State<HomePage> {
   DecisionBoard? _board;
   String? _error;
   int _loadSequence = 0;
+  int _listSequence = 0;
+  int _shareSequence = 0;
 
   @override
   void initState() {
@@ -58,24 +60,27 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _reload() async {
-    final sequence = ++_loadSequence;
+    final sequence = ++_listSequence;
+    ++_loadSequence;
     final deps = AppScope.of(context);
     await deps.connectivity.refresh();
-    if (!_isCurrentLoad(sequence)) return;
+    if (!_isCurrentList(sequence)) return;
     try {
       final trips = await deps.trips.listMyTrips();
-      if (!_isCurrentLoad(sequence)) return;
+      if (!_isCurrentList(sequence)) return;
       setState(() {
         _trips = trips;
         _error = null;
         if (_board?.trip.id != _selectedTrip?.id) _board = null;
       });
     } on TripException catch (error) {
-      if (!_isCurrentLoad(sequence)) return;
+      if (!_isCurrentList(sequence)) return;
       setState(() => _error = error.message);
     }
-    await _loadBoard(sequence: sequence);
+    await _loadBoard();
   }
+
+  bool _isCurrentList(int sequence) => mounted && sequence == _listSequence;
 
   bool _isCurrentLoad(int sequence, [String? tripId]) =>
       mounted &&
@@ -84,27 +89,32 @@ class _HomePageState extends State<HomePage> {
 
   /// 看板只讀現有資料：成員、修改申請、邀請碼。讀不到時不擋首頁。
   /// 成功回傳該次看板；失敗明確標記，已被新請求取代則不回傳可分享資料。
-  Future<({DecisionBoard? board, bool failed})> _loadBoard({
-    int? sequence,
+  Future<({DecisionBoard? board, bool failed, bool inviteFailed})> _loadBoard({
+    bool forSharing = false,
   }) async {
-    final request = sequence ?? ++_loadSequence;
-    if (!_isCurrentLoad(request)) return (board: null, failed: false);
+    // 提示上的「重試」可能在首頁移除後才被按下。
+    if (!mounted) return (board: null, failed: false, inviteFailed: false);
+    final request = ++_loadSequence;
     final selected = _selectedTrip;
     if (selected == null) {
       setState(() => _board = null);
-      return (board: null, failed: false);
+      return (board: null, failed: false, inviteFailed: false);
     }
     final deps = AppScope.of(context);
     try {
       // 重新讀旅程：公開邀請的截止時間、回程等可能在旅程頁被改過。
       final trip = await deps.trips.getTrip(selected.id);
       if (!_isCurrentLoad(request, selected.id)) {
-        return (board: null, failed: false);
+        return (board: null, failed: false, inviteFailed: false);
       }
-      if (trip.id != selected.id) return (board: null, failed: true);
+      if (trip.id != selected.id) {
+        return (board: null, failed: true, inviteFailed: false);
+      }
       final members = await deps.trips.listMembers(trip.id);
       final requests = await deps.trips.listRequests(trip.id);
-      final invites = await deps.trips.listInvites(trip.id);
+      final validation = forSharing
+          ? await deps.trips.revalidateInvites(trip.id)
+          : (invites: await deps.trips.listInvites(trip.id), failed: false);
       final now = await deps.clock.now();
       final selfId = deps.auth.current?.id;
       TripMember? self;
@@ -112,14 +122,14 @@ class _HomePageState extends State<HomePage> {
         if (member.userId == selfId) self = member;
       }
       if (!_isCurrentLoad(request, selected.id)) {
-        return (board: null, failed: false);
+        return (board: null, failed: false, inviteFailed: false);
       }
       final board = DecisionBoard.build(
         trip: trip,
         self: self,
         members: members,
         requests: requests,
-        invites: invites,
+        invites: validation.invites,
         now: now,
         inviteUrlFor: deps.firebaseConfigured
             ? (code) => InviteLink.build(
@@ -128,11 +138,16 @@ class _HomePageState extends State<HomePage> {
               )
             : null,
       );
-      setState(() => _board = board);
-      return (board: board, failed: false);
+      // 重驗暫時失敗時保留畫面上的看板，不把它降級成「沒有可分享的碼」。
+      if (!validation.failed) setState(() => _board = board);
+      return (board: board, failed: false, inviteFailed: validation.failed);
     } on TripException {
       // 同一旅程的舊看板仍可閱讀，但絕不可當成這次重讀成功的結果。
-      return (board: null, failed: _isCurrentLoad(request, selected.id));
+      return (
+        board: null,
+        failed: _isCurrentLoad(request, selected.id),
+        inviteFailed: false,
+      );
     }
   }
 
@@ -143,7 +158,10 @@ class _HomePageState extends State<HomePage> {
       case BoardAction.openTrip:
         await _openTrip(board.trip);
       case BoardAction.shareInvite:
-        final fresh = await _freshBoard(retry: () => _onBoardAction(action));
+        final fresh = await _freshBoard(
+          retry: () => _onBoardAction(action),
+          requireInvite: true,
+        );
         final invite = fresh?.shareableInvite;
         if (!mounted || fresh == null) return;
         if (invite == null) {
@@ -166,10 +184,22 @@ class _HomePageState extends State<HomePage> {
 
   /// 分享前用現在的時間與最新的旅程、邀請碼重算看板，不用畫面載入時的快照
   /// （Codex 審查 #60 F02）。
-  Future<DecisionBoard?> _freshBoard({required VoidCallback retry}) async {
-    final result = await _loadBoard();
-    if (!mounted) return null;
-    if (result.failed) {
+  Future<DecisionBoard?> _freshBoard({
+    required VoidCallback retry,
+    bool requireInvite = false,
+  }) async {
+    final share = ++_shareSequence;
+    final result = await _loadBoard(forSharing: true);
+    // 連按時只處理最後一次，較早的那次不提示。
+    if (!mounted || share != _shareSequence) return null;
+    // 被背景載入取代時沒有可分享的資料；要告訴使用者，不能無聲取消。
+    final superseded =
+        result.board == null && !result.failed && _selectedTrip != null;
+    if (result.failed ||
+        superseded ||
+        (requireInvite &&
+            result.inviteFailed &&
+            result.board?.shareableInvite == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(AppStrings.boardRefreshFailed),
@@ -179,6 +209,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       );
+      return null;
     }
     return result.board;
   }

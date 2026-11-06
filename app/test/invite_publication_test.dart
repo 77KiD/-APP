@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:group_trip/core/ids/id_generator.dart';
@@ -38,6 +40,64 @@ class RecoverableConnectivity extends ConnectivityProbe {
 
 void main() {
   setUpAll(tzdata.initializeTimeZones);
+
+  for (final state in [
+    'disabled',
+    'missing',
+    'wrong-trip',
+    'error',
+    'timeout',
+    'offline',
+  ]) {
+    test('分享重驗已確認的碼：$state', () async {
+      late _KnownInviteRemote remote;
+      final world = TestWorld(
+        remoteFactory: (database, user) {
+          remote = _KnownInviteRemote(database: database, currentUserId: user);
+          return remote;
+        },
+      );
+      await world.auth.signUp(
+        email: 'host@example.com',
+        password: 'password1',
+        displayName: '隊長',
+        birthday: '2000-01-01',
+        birthdayConsent: true,
+        today: world.clock.current,
+      );
+      final trip = await world.trips.createTrip(form());
+      final original = (await world.trips.local.readInvite(trip.inviteCode))!;
+      expect(original.serverConfirmed, isTrue);
+      remote.reads.clear();
+      await world.trips.listMyTrips();
+      await world.trips.getTrip(trip.id);
+      await world.trips.listInvites(trip.id);
+      expect(remote.reads, isEmpty, reason: '一般載入不逐碼重驗已確認的碼');
+      remote.state = state;
+      if (state == 'offline') world.connectivity.isOnline = false;
+      final repository = OfflineTripRepository(
+        local: world.trips.local,
+        remote: remote,
+        currentAccount: () => world.auth.current,
+        clock: world.clock,
+        ids: RandomIdGenerator(),
+        connectivity: world.connectivity,
+        serverWriteTimeout: const Duration(milliseconds: 5),
+      );
+      final result = await repository.revalidateInvites(trip.id);
+      expect(result.failed, ['error', 'timeout', 'offline'].contains(state));
+      if (state == 'disabled') {
+        expect(result.invites.single.active, isFalse);
+        expect(
+          (await repository.local.readInvite(original.code))!.active,
+          isFalse,
+        );
+      } else {
+        expect(result.invites, isEmpty);
+      }
+      expect(remote.reads, state == 'offline' ? isEmpty : [original.code]);
+    });
+  }
 
   test('recovered network publishes a usable code before reporting success', () async {
     final clock = FixedDeviceClock(DateTime.utc(2026, 10, 26, 1));
@@ -236,4 +296,29 @@ void main() {
       );
     },
   );
+}
+
+class _KnownInviteRemote extends MemoryTripRemote {
+  _KnownInviteRemote({required super.database, required super.currentUserId});
+  final reads = <String>[];
+  String? state;
+  @override
+  Future<List<InviteRecord>> fetchInvites(String tripId) async => [];
+  @override
+  Future<InviteRecord?> fetchInvite(String code) async {
+    reads.add(code);
+    if (state == 'error') throw TripException('讀取失敗');
+    if (state == 'timeout') return Completer<InviteRecord?>().future;
+    if (state == 'missing') return null;
+    final original = await super.fetchInvite(code);
+    if (original == null || state == null) return original;
+    return InviteRecord(
+      code: code,
+      tripId: state == 'wrong-trip' ? 'other-trip' : original.tripId,
+      createdBy: original.createdBy,
+      active: state != 'disabled',
+      createdAt: original.createdAt,
+      expiresAt: original.expiresAt,
+    );
+  }
 }

@@ -25,6 +25,8 @@ class TestWorld {
     bool firebaseConfigured = false,
     bool isWeb = false,
     String? initialInviteCode,
+    MemoryTripRemote Function(MemoryTripDatabase, String Function())?
+    remoteFactory,
   }) {
     tzdata.initializeTimeZones();
     clock = FixedDeviceClock(now ?? DateTime.utc(2026, 10, 26, 1));
@@ -34,10 +36,12 @@ class TestWorld {
       store: MemoryDocumentStore(),
       ids: SequentialIdGenerator(),
     );
-    remote = MemoryTripRemote(
-      database: database,
-      currentUserId: () => auth.current?.id ?? '',
-    );
+    remote =
+        remoteFactory?.call(database, () => auth.current?.id ?? '') ??
+        MemoryTripRemote(
+          database: database,
+          currentUserId: () => auth.current?.id ?? '',
+        );
     trips = OfflineTripRepository(
       local: TripLocalStore(MemoryDocumentStore()),
       remote: remote,

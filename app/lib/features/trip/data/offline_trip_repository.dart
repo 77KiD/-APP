@@ -636,6 +636,39 @@ class OfflineTripRepository implements TripRepository {
   }
 
   @override
+  Future<({List<InviteRecord> invites, bool failed})> revalidateInvites(
+    String tripId,
+  ) async {
+    final known = await local.readInvites(tripId);
+    final invites = <InviteRecord>[];
+    var failed = false;
+    try {
+      await connectivity.refresh();
+      if (!connectivity.isOnline) return (invites: invites, failed: true);
+    } on Exception {
+      return (invites: invites, failed: true);
+    }
+    await Future.wait([
+      for (final cached in known)
+        () async {
+          try {
+            final fresh = await remote
+                .fetchInvite(cached.code)
+                .timeout(serverWriteTimeout);
+            if (fresh == null || fresh.tripId != tripId) return;
+            final confirmed = fresh.withServerConfirmation(true);
+            // 停用狀態也必須寫回快取。
+            await local.saveInvite(confirmed);
+            invites.add(confirmed);
+          } on Exception {
+            failed = true;
+          }
+        }(),
+    ]);
+    return (invites: invites, failed: failed);
+  }
+
+  @override
   Future<void> saveItineraryDay(ItineraryDay day) async {
     await getTrip(day.tripId);
     final now = await _stamp();

@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:group_trip/app/app_dependencies.dart';
+import 'package:group_trip/core/firebase/firebase_config.dart';
+import 'package:group_trip/features/trip/domain/invite_link.dart';
+import 'package:group_trip/features/trip/data/memory_trip_remote.dart';
 import 'package:group_trip/features/home/presentation/decision_board_view.dart';
 import 'package:group_trip/features/home/home_page.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
@@ -13,8 +16,20 @@ import 'package:group_trip/l10n/app_strings.dart';
 import 'support/harness.dart';
 
 void main() {
-  Future<TestWorld> signedIn() async {
-    final world = TestWorld();
+  Future<TestWorld> signedIn({
+    bool firebase = false,
+    _InviteReads? remote,
+  }) async {
+    final world = TestWorld(
+      firebaseConfigured: firebase,
+      remoteFactory: remote == null
+          ? null
+          : (database, user) {
+              remote.databaseSource = database;
+              remote.user = user;
+              return remote;
+            },
+    );
     await world.auth.signUp(
       email: 'ada@example.com',
       password: 'password1',
@@ -244,7 +259,7 @@ void main() {
   }
 
   for (final fail in [false, true]) {
-    testWidgets('分享重讀被新載入取代，舊讀取${fail ? '失敗' : '成功'}不分享或顯示過時提示', (
+    testWidgets('分享重讀被新載入取代，舊讀取${fail ? '失敗' : '成功'}不分享舊資料並提示重試', (
       tester,
     ) async {
       tallView(tester);
@@ -277,9 +292,78 @@ void main() {
       expect(world.share.shared, isEmpty);
       expect(find.byKey(const Key('decision-board')), findsOneWidget);
       expect(find.text(AppStrings.boardSetReturn), findsNothing);
-      expect(find.text(AppStrings.boardRefreshFailed), findsNothing);
+      expect(find.text(AppStrings.boardRefreshFailed), findsOneWidget);
+
+      await tester.tap(find.text(AppStrings.boardRetry));
+      await tester.pumpAndSettle();
+      expect(world.share.shared.single, contains('2026-11-05 17:00'));
     });
   }
+
+  testWidgets('連按分享只送出一次，也不顯示重試提示', (tester) async {
+    tallView(tester);
+    final world = await signedIn();
+    final id = await createTrip(world);
+    final reads = _HomeReads(world.trips);
+    await tester.pumpWidget(
+      wrapPage(_withReads(world, reads), const HomePage()),
+    );
+    await tester.pumpAndSettle();
+    final oldTrip = await world.trips.getTrip(id);
+    final gate = Completer<Trip>();
+    reads.readTrip = (_) => gate.future;
+    await tester.tap(find.byKey(const Key('share-board')));
+    await tester.pumpAndSettle();
+    reads.readTrip = null;
+    await tester.tap(find.byKey(const Key('share-board')));
+    await tester.pumpAndSettle();
+
+    gate.complete(oldTrip);
+    await tester.pumpAndSettle();
+
+    expect(world.share.shared, hasLength(1));
+    expect(find.text(AppStrings.boardRefreshFailed), findsNothing);
+  });
+
+  testWidgets('首頁移除後才按重試，不會丟例外也不分享', (tester) async {
+    tallView(tester);
+    final world = await signedIn();
+    await createTrip(world);
+    final reads = _HomeReads(world.trips);
+    final deps = _withReads(world, reads);
+    await tester.pumpWidget(wrapPage(deps, const HomePage()));
+    await tester.pumpAndSettle();
+    reads.readTrip = (_) async => throw TripException('讀取失敗');
+    await tester.tap(find.byKey(const Key('share-board')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    final retry = tester.widget<SnackBarAction>(find.byType(SnackBarAction));
+
+    await tester.pumpWidget(wrapPage(deps, const Scaffold()));
+    retry.onPressed();
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(world.share.shared, isEmpty);
+  });
+
+  testWidgets('重驗暫時失敗時，畫面上的看板保留原本的分享入口', (tester) async {
+    tallView(tester);
+    final world = await signedIn();
+    await createTrip(world);
+    await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
+    await tester.pumpAndSettle();
+    expect(find.text(AppStrings.boardShareInviteHint), findsOneWidget);
+    world.connectivity.isOnline = false;
+
+    await tester.tap(find.text(AppStrings.boardInviteFriends));
+    await tester.pumpAndSettle();
+
+    expect(world.share.shared, isEmpty);
+    expect(find.text(AppStrings.boardRefreshFailed), findsOneWidget);
+    expect(find.text(AppStrings.boardShareInviteHint), findsOneWidget);
+    expect(find.text(AppStrings.boardNoShareableInvite), findsNothing);
+  });
 
   testWidgets('重讀回傳不同旅程 ID 時不更新看板或分享', (tester) async {
     tallView(tester);
@@ -369,6 +453,176 @@ void main() {
     }
   }
 
+  for (final failure in ['disabled', 'missing', 'offline', 'error']) {
+    testWidgets('分享前重新確認已確認的碼：$failure', (tester) async {
+      tallView(tester);
+      final remote = _InviteReads();
+      final world = await signedIn(firebase: true, remote: remote);
+      final id = await createTrip(world);
+      final trip = await world.trips.getTrip(id);
+      remote.reads = 0;
+      await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
+      await tester.pumpAndSettle();
+      expect(remote.reads, 0, reason: '一般首頁不重查已確認的碼');
+      final original = world.database.invites[trip.inviteCode]!;
+      if (failure == 'disabled') {
+        world.database.invites[original.code] = InviteRecord(
+          code: original.code,
+          tripId: id,
+          createdBy: original.createdBy,
+          createdAt: original.createdAt,
+          expiresAt: original.expiresAt,
+          active: false,
+        );
+      } else if (failure == 'missing') {
+        world.database.invites.remove(original.code);
+      } else if (failure == 'offline') {
+        world.connectivity.isOnline = false;
+      } else {
+        remote.fail = true;
+      }
+      await tester.tap(find.text(AppStrings.boardInviteFriends));
+      await tester.pumpAndSettle();
+      expect(world.share.shared, isEmpty);
+      if (failure == 'offline' || failure == 'error') {
+        expect(find.text(AppStrings.boardRefreshFailed), findsOneWidget);
+        remote.fail = false;
+        world.connectivity.isOnline = true;
+        await tester.tap(find.text(AppStrings.boardRetry));
+        await tester.pumpAndSettle();
+        expect(world.share.shared.single, contains(original.code));
+        world.share.shared.clear();
+        remote.fail = true;
+        world.connectivity.isOnline = failure != 'offline';
+      } else {
+        expect(find.text(AppStrings.boardNoShareableInvite), findsWidgets);
+        if (failure == 'disabled') {
+          expect(
+            (await world.trips.local.readInvite(original.code))!.active,
+            isFalse,
+          );
+        }
+      }
+      await tester.tap(find.byKey(const Key('share-board')));
+      await tester.pumpAndSettle();
+      expect(
+        world.share.shared.single,
+        startsWith(AppStrings.boardShareTitle(trip.title)),
+      );
+      expect(world.share.shared.single, isNot(contains(original.code)));
+      expect(world.share.shared.single, isNot(contains('https://')));
+    });
+  }
+
+  for (final failure in ['disabled', 'offline', 'error']) {
+    testWidgets('分享看板省略未通過重驗的碼與連結：$failure', (tester) async {
+      tallView(tester);
+      final remote = _InviteReads();
+      final world = await signedIn(firebase: true, remote: remote);
+      final id = await createTrip(world);
+      final trip = await world.trips.getTrip(id);
+      await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
+      await tester.pumpAndSettle();
+      if (failure == 'disabled') {
+        final old = world.database.invites[trip.inviteCode]!;
+        world.database.invites[old.code] = InviteRecord(
+          code: old.code,
+          tripId: id,
+          createdBy: old.createdBy,
+          createdAt: old.createdAt,
+          expiresAt: old.expiresAt,
+          active: false,
+        );
+      } else if (failure == 'offline') {
+        world.connectivity.isOnline = false;
+      } else {
+        remote.fail = true;
+      }
+      await tester.tap(find.byKey(const Key('share-board')));
+      await tester.pumpAndSettle();
+      final text = world.share.shared.single;
+      expect(text, startsWith(AppStrings.boardShareTitle(trip.title)));
+      expect(text, contains(AppStrings.boardDates));
+      expect(text, contains(AppStrings.boardMemberCount(1)));
+      expect(text, isNot(contains(trip.inviteCode)));
+      expect(text, isNot(contains('https://')));
+    });
+  }
+
+  testWidgets('另有通過重驗的碼時仍可分享', (tester) async {
+    tallView(tester);
+    final remote = _InviteReads();
+    final world = await signedIn(remote: remote);
+    final id = await createTrip(world);
+    final trip = await world.trips.getTrip(id);
+    world.clock.current = world.clock.current.add(const Duration(minutes: 1));
+    world.database.clock = world.clock.current;
+    final newer = await world.trips.issueInviteCode(id);
+    await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
+    await tester.pumpAndSettle();
+    world.database.invites.remove(newer.code);
+    await tester.tap(find.text(AppStrings.boardInviteFriends));
+    await tester.pumpAndSettle();
+    expect(world.share.shared.single, contains(trip.inviteCode));
+    expect(world.share.shared.single, isNot(contains(newer.code)));
+  });
+
+  testWidgets(
+    'Firebase 首頁分享邀請包含連結',
+    (tester) async {
+      tallView(tester);
+      final world = await signedIn(firebase: true);
+      final id = await createTrip(world);
+      final trip = await world.trips.getTrip(id);
+      await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(AppStrings.boardInviteFriends));
+      await tester.pumpAndSettle();
+      expect(
+        world.share.shared.single,
+        contains(
+          InviteLink.build(
+            projectId: FirebaseConfig.projectId,
+            code: trip.inviteCode,
+          )!,
+        ),
+      );
+    },
+    // flutter test --dart-define=FIREBASE_PROJECT_ID=share-test
+    skip: FirebaseConfig.projectId.isEmpty,
+  );
+
+  testWidgets('清單載入中分享仍會更新旅程清單', (tester) async {
+    tallView(tester);
+    final world = await signedIn();
+    await createTrip(world);
+    final reads = _HomeReads(world.trips);
+    await tester.pumpWidget(
+      wrapPage(_withReads(world, reads), const HomePage()),
+    );
+    await tester.pumpAndSettle();
+    final trips = await world.trips.listMyTrips();
+    final newTrip = await world.trips.createTrip(
+      const NewTripForm(
+        title: '新旅程',
+        startDate: '2026-11-01',
+        endDate: '2026-11-05',
+        timeZone: 'Asia/Taipei',
+        returnDate: '',
+        returnTime: '',
+      ),
+    );
+    expect(trips, hasLength(1));
+    final gate = Completer<List<Trip>>();
+    reads.readTrips = () => gate.future;
+    await returnHome(tester);
+    await tester.tap(find.byKey(const Key('share-board')));
+    await tester.pumpAndSettle();
+    gate.complete([newTrip]);
+    await tester.pumpAndSettle();
+    expect(find.text('新旅程'), findsWidgets);
+  });
+
   testWidgets('沒有旅程時，行程分頁顯示先建立或加入旅程', (tester) async {
     final world = await signedIn();
     await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
@@ -418,5 +672,31 @@ class _HomeReads implements TripRepository {
   @override
   Future<List<InviteRecord>> listInvites(String id) => delegate.listInvites(id);
   @override
+  Future<({List<InviteRecord> invites, bool failed})> revalidateInvites(
+    String id,
+  ) => delegate.revalidateInvites(id);
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// 模擬 Firestore：不能列出邀請碼，只能依已知碼逐筆讀取。
+class _InviteReads extends MemoryTripRemote {
+  _InviteReads()
+    : super(database: MemoryTripDatabase(), currentUserId: () => '');
+  late MemoryTripDatabase databaseSource;
+  late String Function() user;
+  bool fail = false;
+  int reads = 0;
+  @override
+  MemoryTripDatabase get database => databaseSource;
+  @override
+  String Function() get currentUserId => user;
+  @override
+  Future<List<InviteRecord>> fetchInvites(String tripId) async => [];
+  @override
+  Future<InviteRecord?> fetchInvite(String code) async {
+    if (database.invites.containsKey(code)) reads++;
+    if (fail) throw TripException('讀取失敗');
+    return super.fetchInvite(code);
+  }
 }
