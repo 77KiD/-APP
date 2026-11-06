@@ -423,6 +423,46 @@ void main() {
     expect(find.text(AppStrings.boardRefreshFailed), findsNothing);
   });
 
+  testWidgets('略過背景載入後重驗失敗，看板仍更新成新資料，分享不含碼', (tester) async {
+    tallView(tester);
+    final remote = _InviteReads();
+    final world = await signedIn(firebase: true, remote: remote);
+    final id = await createTrip(world);
+    final reads = _HomeReads(world.trips);
+    await tester.pumpWidget(
+      wrapPage(_withReads(world, reads), const HomePage()),
+    );
+    await tester.pumpAndSettle();
+    final original = await world.trips.getTrip(id);
+    final trips = await world.trips.listMyTrips();
+    await world.trips.updateExpectedReturnTime(
+      tripId: id,
+      proposed: DateTime.utc(2026, 11, 5, 9),
+    );
+    final updated = await world.trips.getTrip(id);
+    final listGate = Completer<List<Trip>>();
+    final tripGate = Completer<Trip>();
+    reads.readTrips = () => listGate.future;
+    await returnHome(tester);
+    reads.readTrip = (_) => tripGate.future;
+    remote.fail = true;
+    await tester.tap(find.byKey(const Key('share-board')));
+    await tester.pump();
+
+    listGate.complete(trips);
+    await tester.pump();
+    tripGate.complete(updated);
+    await tester.pumpAndSettle();
+
+    expect(world.share.shared.single, contains('2026-11-05 17:00'));
+    expect(world.share.shared.single, isNot(contains(original.inviteCode)));
+    final shown = tester
+        .widget<DecisionBoardView>(find.byType(DecisionBoardView))
+        .board;
+    expect(shown.trip.expectedReturnAt, DateTime.utc(2026, 11, 5, 9));
+    expect(shown.shareableInvite?.code, original.inviteCode);
+  });
+
   testWidgets('清單回來後選中的旅程變了，舊分享取消且看板顯示新旅程', (tester) async {
     tallView(tester);
     final world = await signedIn();

@@ -133,6 +133,11 @@ class _HomePageState extends State<HomePage> {
       final validation = forSharing
           ? await deps.trips.revalidateInvites(trip.id)
           : (invites: await deps.trips.listInvites(trip.id), failed: false);
+      // 重驗暫時失敗時，畫面用新的旅程資料與快取的碼，不把它降級成「沒有可分享
+      // 的碼」。分享的內容仍只用通過重驗的碼。
+      final displayInvites = validation.failed
+          ? await deps.trips.listInvites(trip.id)
+          : validation.invites;
       final now = await deps.clock.now();
       final selfId = deps.auth.current?.id;
       TripMember? self;
@@ -142,22 +147,24 @@ class _HomePageState extends State<HomePage> {
       if (!_isCurrentLoad(request, selected.id)) {
         return (board: null, failed: false, inviteFailed: false);
       }
-      final board = DecisionBoard.build(
-        trip: trip,
-        self: self,
-        members: members,
-        requests: requests,
-        invites: validation.invites,
-        now: now,
-        inviteUrlFor: deps.firebaseConfigured
-            ? (code) => InviteLink.build(
-                projectId: FirebaseConfig.projectId,
-                code: code,
-              )
-            : null,
-      );
-      // 重驗暫時失敗時保留畫面上的看板，不把它降級成「沒有可分享的碼」。
-      if (!validation.failed) setState(() => _board = board);
+      DecisionBoard buildWith(List<InviteRecord> invites) =>
+          DecisionBoard.build(
+            trip: trip,
+            self: self,
+            members: members,
+            requests: requests,
+            invites: invites,
+            now: now,
+            inviteUrlFor: deps.firebaseConfigured
+                ? (code) => InviteLink.build(
+                    projectId: FirebaseConfig.projectId,
+                    code: code,
+                  )
+                : null,
+          );
+      final board = buildWith(validation.invites);
+      final display = validation.failed ? buildWith(displayInvites) : board;
+      setState(() => _board = display);
       return (board: board, failed: false, inviteFailed: validation.failed);
     } on TripException {
       // 同一旅程的舊看板仍可閱讀，但絕不可當成這次重讀成功的結果。

@@ -267,6 +267,20 @@ void main() {
       find.byKey(const Key('issue-invite')),
     );
     expect(issue.onPressed, isNotNull);
+
+    await tester.tap(find.byKey(const Key('issue-invite')));
+    await tester.pumpAndSettle();
+
+    final fresh = (await world.trips.local.readInvites(trip.id))
+        .singleWhere((invite) => invite.code != trip.inviteCode);
+    expect(fresh.active, isTrue);
+    expect(fresh.serverConfirmed, isTrue);
+    expect(world.database.invites[fresh.code]?.active, isTrue);
+    expect(find.text(AppStrings.copyInviteCode(fresh.code)), findsOneWidget);
+    expect(
+      find.text(AppStrings.inviteInactive(trip.inviteCode)),
+      findsOneWidget,
+    );
   });
 
   test('recovered network publishes a usable code before reporting success', () async {
