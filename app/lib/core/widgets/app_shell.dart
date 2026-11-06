@@ -56,6 +56,7 @@ class AppShell extends StatefulWidget {
     this.hideBottomNav = false,
     this.bodyBuilder,
     this.connectionStatus = ConnectionStatus.online,
+    this.onTabChanged,
     this.pendingApprovalsCount = 0,
     this.isLeaderOrDeputy = false,
   });
@@ -69,6 +70,9 @@ class AppShell extends StatefulWidget {
 
   /// 由 App 依連線狀態傳入，顯示在右上角。
   final ConnectionStatus connectionStatus;
+
+  /// 切換分頁時通知 App，例如回首頁時重新整理看板（Codex 審查 #60 F03）。
+  final ValueChanged<BottomNavTab>? onTabChanged;
   final int pendingApprovalsCount;
   final bool isLeaderOrDeputy;
 
@@ -102,7 +106,10 @@ class _AppShellState extends State<AppShell> {
           ? null
           : _AppBottomNav(
               currentTab: _currentTab,
-              onTabChanged: (tab) => setState(() => _currentTab = tab),
+              onTabChanged: (tab) {
+                setState(() => _currentTab = tab);
+                widget.onTabChanged?.call(tab);
+              },
               pendingApprovalsCount: widget.pendingApprovalsCount,
               showApprovalsCount: widget.isLeaderOrDeputy,
             ),

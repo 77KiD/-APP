@@ -147,7 +147,11 @@ class DecisionBoard {
     }
 
     // 我的待辦：只列「我」現在要做的少數事項（缺點分析第 3 點）。
-    final shareable = _shareableInvite(invites, now);
+    final shareable = shareableInviteFor(
+      trip: trip,
+      invites: invites,
+      now: now,
+    );
     if (trip.status != TripStatus.ended) {
       if (manager && open.isNotEmpty) {
         items.add(
@@ -214,13 +218,24 @@ class DecisionBoard {
     );
   }
 
-  static InviteRecord? _shareableInvite(
-    List<InviteRecord> invites,
-    DateTime now,
-  ) {
+  /// 可以分享的邀請碼：伺服器已確認、啟用中、在效期內，而且沒有被關閉公開邀請
+  /// 的截止時間擋下（一般成員在 `invitesResetAt` 之前產生的碼，見 0007、#53）。
+  /// Codex 審查 #60 F01。
+  static InviteRecord? shareableInviteFor({
+    required Trip trip,
+    required List<InviteRecord> invites,
+    required DateTime now,
+  }) {
     InviteRecord? best;
     for (final invite in invites) {
       if (!invite.serverConfirmed || !invite.active) continue;
+      if (TripPolicy.memberInviteBlocked(
+        invitesResetAt: trip.invitesResetAt,
+        issuerRole: invite.issuerRole,
+        createdAt: invite.createdAt,
+      )) {
+        continue;
+      }
       if (TripPolicy.isInviteJoinExpired(
         expiresAt: invite.expiresAt,
         createdAt: invite.createdAt,

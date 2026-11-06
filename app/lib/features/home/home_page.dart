@@ -75,13 +75,15 @@ class _HomePageState extends State<HomePage> {
 
   /// 看板只讀現有資料：成員、修改申請、邀請碼。讀不到時不擋首頁。
   Future<void> _loadBoard() async {
-    final trip = _selectedTrip;
-    if (trip == null) {
+    final selected = _selectedTrip;
+    if (selected == null) {
       if (mounted) setState(() => _board = null);
       return;
     }
     final deps = AppScope.of(context);
     try {
+      // 重新讀旅程：公開邀請的截止時間、回程等可能在旅程頁被改過。
+      final trip = await deps.trips.getTrip(selected.id);
       final members = await deps.trips.listMembers(trip.id);
       final requests = await deps.trips.listRequests(trip.id);
       final invites = await deps.trips.listInvites(trip.id);
@@ -120,17 +122,32 @@ class _HomePageState extends State<HomePage> {
       case BoardAction.openTrip:
         await _openTrip(board.trip);
       case BoardAction.shareInvite:
-        final invite = board.shareableInvite;
-        if (invite == null) return;
+        final fresh = await _freshBoard();
+        final invite = fresh?.shareableInvite;
+        if (!mounted || fresh == null) return;
+        if (invite == null) {
+          // 載入後碼已過期或失效：不分享舊碼，提示到旅程頁重新產生。
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(AppStrings.boardNoShareableInvite)),
+          );
+          return;
+        }
         await AppScope.of(context).share
-            .shareText(board.inviteShareText(invite));
+            .shareText(fresh.inviteShareText(invite));
     }
   }
 
   Future<void> _shareBoard() async {
-    final board = _board;
-    if (board == null) return;
-    await AppScope.of(context).share.shareText(board.shareText());
+    final fresh = await _freshBoard();
+    if (!mounted || fresh == null) return;
+    await AppScope.of(context).share.shareText(fresh.shareText());
+  }
+
+  /// 分享前用現在的時間與最新的旅程、邀請碼重算看板，不用畫面載入時的快照
+  /// （Codex 審查 #60 F02）。
+  Future<DecisionBoard?> _freshBoard() async {
+    await _loadBoard();
+    return _board;
   }
 
   Future<void> _openCreate() async {
@@ -160,6 +177,10 @@ class _HomePageState extends State<HomePage> {
           ? ConnectionStatus.online
           : ConnectionStatus.offline,
       onSettingsTap: () => _open(const SettingsPage()),
+      // 在行程、成員分頁改過資料後回首頁，看板要跟著更新（Codex 審查 #60 F03）。
+      onTabChanged: (tab) {
+        if (tab == BottomNavTab.home) _reload();
+      },
       bodyBuilder: (context, tab) {
         switch (tab) {
           case BottomNavTab.home:
