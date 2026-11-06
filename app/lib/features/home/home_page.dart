@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:group_trip/app/app_scope.dart';
+import 'package:group_trip/core/firebase/firebase_config.dart';
 import 'package:group_trip/core/theme/semantic_colors.dart';
 import 'package:group_trip/core/theme/spacing.dart';
 import 'package:group_trip/core/widgets/app_shell.dart';
@@ -7,6 +8,7 @@ import 'package:group_trip/core/widgets/form_widgets.dart';
 import 'package:group_trip/features/home/domain/decision_board.dart';
 import 'package:group_trip/features/home/presentation/decision_board_view.dart';
 import 'package:group_trip/features/settings/presentation/settings_page.dart';
+import 'package:group_trip/features/trip/domain/invite_link.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/features/trip/presentation/create_trip_page.dart';
 import 'package:group_trip/features/trip/presentation/join_trip_page.dart';
@@ -31,8 +33,20 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _reload();
+      if (!mounted) return;
+      _reload();
+      _openInviteFromLink();
     });
+  }
+
+  bool _handledInviteLink = false;
+
+  /// 從邀請連結打開時，直接帶到加入頁並填好邀請碼（ADR 0012 第 3 點）。
+  Future<void> _openInviteFromLink() async {
+    final code = AppScope.of(context).initialInviteCode;
+    if (code == null || _handledInviteLink) return;
+    _handledInviteLink = true;
+    await _open(JoinTripPage(initialCode: code));
   }
 
   Trip? get _selectedTrip {
@@ -86,6 +100,12 @@ class _HomePageState extends State<HomePage> {
           requests: requests,
           invites: invites,
           now: now,
+          inviteUrlFor: deps.firebaseConfigured
+              ? (code) => InviteLink.build(
+                  projectId: FirebaseConfig.projectId,
+                  code: code,
+                )
+              : null,
         ),
       );
     } on TripException {
@@ -103,7 +123,7 @@ class _HomePageState extends State<HomePage> {
         final invite = board.shareableInvite;
         if (invite == null) return;
         await AppScope.of(context).share
-            .shareText(DecisionBoard.inviteShareText(board.trip, invite));
+            .shareText(board.inviteShareText(invite));
     }
   }
 
@@ -146,6 +166,7 @@ class _HomePageState extends State<HomePage> {
             return _HomeTab(
               name: deps.auth.current?.displayName ?? '',
               localMode: !deps.firebaseConfigured,
+              isWeb: deps.isWeb,
               trips: _trips,
               error: _error,
               board: _board,
@@ -165,6 +186,9 @@ class _HomePageState extends State<HomePage> {
               embedded: true,
             );
           case BottomNavTab.find:
+            if (deps.isWeb) {
+              return const _ComingSoon(message: AppStrings.webFindInApp);
+            }
             if (selected == null) return null;
             return const _ComingSoon(message: AppStrings.findComingSoon);
         }
@@ -177,6 +201,7 @@ class _HomeTab extends StatelessWidget {
   const _HomeTab({
     required this.name,
     required this.localMode,
+    required this.isWeb,
     required this.trips,
     required this.error,
     required this.board,
@@ -189,6 +214,9 @@ class _HomeTab extends StatelessWidget {
 
   final String name;
   final bool localMode;
+
+  /// 網頁版不能建立旅程，只能加入（ADR 0012 第 2 點）。
+  final bool isWeb;
   final List<Trip> trips;
   final String? error;
   final DecisionBoard? board;
@@ -241,15 +269,27 @@ class _HomeTab extends StatelessWidget {
         ],
         FormErrorText(error),
         const SizedBox(height: AppSpacing.s2),
-        FilledButton(
-          onPressed: onCreate,
-          child: const Text(AppStrings.createTrip),
-        ),
-        const SizedBox(height: AppSpacing.s2),
-        OutlinedButton(
-          onPressed: onJoin,
-          child: const Text(AppStrings.joinTrip),
-        ),
+        if (isWeb) ...[
+          Text(
+            AppStrings.webCreateInApp,
+            style: textTheme.bodyMedium?.copyWith(color: colors.muted),
+          ),
+          const SizedBox(height: AppSpacing.s2),
+          FilledButton(
+            onPressed: onJoin,
+            child: const Text(AppStrings.joinTrip),
+          ),
+        ] else ...[
+          FilledButton(
+            onPressed: onCreate,
+            child: const Text(AppStrings.createTrip),
+          ),
+          const SizedBox(height: AppSpacing.s2),
+          OutlinedButton(
+            onPressed: onJoin,
+            child: const Text(AppStrings.joinTrip),
+          ),
+        ],
       ],
     );
   }

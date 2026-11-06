@@ -21,6 +21,8 @@ class AppDependencies {
     required this.ids,
     required this.firebaseConfigured,
     this.share = const SystemShareGateway(),
+    this.isWeb = false,
+    this.initialInviteCode,
   });
 
   final AuthRepository auth;
@@ -36,4 +38,10 @@ class AppDependencies {
 
   /// 系統分享選單（分享到 LINE）。
   final ShareGateway share;
+
+  /// 網頁版只做看行程、投票、填資料卡、看帳（ADR 0012 第 2 點）。
+  final bool isWeb;
+
+  /// 從邀請連結 `/j/<邀請碼>` 打開時帶入的碼，加入頁會先填好。
+  final String? initialInviteCode;
 }

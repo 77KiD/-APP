@@ -23,6 +23,8 @@ class TestWorld {
     DateTime? now,
     bool online = true,
     bool firebaseConfigured = false,
+    bool isWeb = false,
+    String? initialInviteCode,
   }) {
     tzdata.initializeTimeZones();
     clock = FixedDeviceClock(now ?? DateTime.utc(2026, 10, 26, 1));
@@ -68,6 +70,8 @@ class TestWorld {
       ids: SequentialIdGenerator(),
       firebaseConfigured: firebaseConfigured,
       share: share,
+      isWeb: isWeb,
+      initialInviteCode: initialInviteCode,
     );
   }
 
