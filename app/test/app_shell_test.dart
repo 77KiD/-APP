@@ -1,7 +1,10 @@
+import 'dart:ui' show SemanticsAction, Tristate;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:group_trip/core/theme/app_theme.dart';
 import 'package:group_trip/core/widgets/app_shell.dart';
+import 'package:group_trip/l10n/app_strings.dart';
 
 void main() {
   group('AppShell navigation semantics', () {
@@ -63,6 +66,7 @@ void main() {
 
       for (final (size, scale) in [
         (const Size(320, 640), 1.0),
+        (const Size(320, 640), 2.0),
         (const Size(412, 915), 1.0),
         (const Size(412, 915), 1.5),
         (const Size(800, 1000), 1.0),
@@ -98,26 +102,43 @@ void main() {
         }
       });
 
-      testWidgets('保留格是空的：沒有內容，按了也不會切換分頁', (tester) async {
+      testWidgets('保留格顯示即將推出，比一般分頁淡，按了也不會切換分頁', (tester) async {
         await pumpShell(tester, const Size(412, 915));
 
-        expect(
-          find.descendant(of: slot, matching: find.byType(Text)),
-          findsNothing,
+        final label = find.descendant(
+          of: slot,
+          matching: find.text(AppStrings.navComingSoon),
         );
-        expect(
-          find.descendant(of: slot, matching: find.byType(Icon)),
-          findsNothing,
+        final icon = find.descendant(
+          of: slot,
+          matching: find.byIcon(Icons.hourglass_empty),
         );
+        expect(label, findsOneWidget);
+        expect(icon, findsOneWidget);
         expect(
           find.descendant(of: slot, matching: find.byType(InkWell)),
           findsNothing,
         );
         expect(BottomNavTab.values, hasLength(4));
 
+        final normal = tester.widget<Icon>(find.byIcon(Icons.people_outline));
+        final reserved = tester.widget<Icon>(icon);
+        expect(reserved.color!.a, lessThan(normal.color!.a));
+
         await tester.tapAt(tester.getCenter(slot));
         await tester.pump();
         expect(find.text('首頁'), findsNWidgets(2));
+      });
+
+      testWidgets('輔助技術念出即將推出，而且標示為不能使用', (tester) async {
+        final semantics = tester.ensureSemantics();
+        await pumpShell(tester, const Size(412, 915));
+
+        final data = tester.getSemantics(slot).getSemanticsData();
+        expect(data.label, AppStrings.navComingSoon);
+        expect(data.flagsCollection.isEnabled, Tristate.isFalse);
+        expect(data.hasAction(SemanticsAction.tap), isFalse);
+        semantics.dispose();
       });
     });
 

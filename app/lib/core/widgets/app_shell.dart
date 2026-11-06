@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:group_trip/core/theme/semantic_colors.dart';
 import 'package:group_trip/core/theme/spacing.dart';
+import 'package:group_trip/l10n/app_strings.dart';
 
 enum BottomNavTab {
   itinerary,
@@ -405,9 +406,50 @@ class _AppBottomNav extends StatelessWidget {
             ),
             // 首頁右邊保留一格給之後的新功能，首頁才會在正中間（ADR 0011 第 1 點）。
             if (tab == BottomNavTab.home)
-              const Expanded(child: SizedBox(key: Key('reserved-nav-slot'))),
+              const Expanded(
+                child: _ComingSoonSlot(key: Key('reserved-nav-slot')),
+              ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// 下排保留給新功能的位置。還不能用，所以比一般分頁淡，也按不了。
+class _ComingSoonSlot extends StatelessWidget {
+  const _ComingSoonSlot({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.colors.dim.withValues(alpha: 0.55);
+
+    return Semantics(
+      label: AppStrings.navComingSoon,
+      enabled: false,
+      excludeSemantics: true,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.hourglass_empty, size: 24, color: color),
+            const SizedBox(height: 2),
+            // 這格比其他分頁的文字長，窄螢幕或放大文字時要縮小才放得下。
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                AppStrings.navComingSoon,
+                maxLines: 1,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
