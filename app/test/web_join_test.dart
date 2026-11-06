@@ -255,7 +255,13 @@ void main() {
       expect(world.database.invites.length, invitesBefore + 1);
 
       final requestsBefore = world.database.requests[setup.trip.id]!.length;
-      await enterLabeled(tester, AppStrings.returnDate, '2026-11-05');
+      // 旅程頁的回程日期也只輸入數字（#76）。
+      await enterLabeled(tester, AppStrings.returnDate, '20261105');
+      final returnDate = tester.widget<TextField>(
+        labeledField(AppStrings.returnDate),
+      );
+      expect(returnDate.controller!.text, '2026-11-05');
+      expect(returnDate.keyboardType, TextInputType.number);
       await enterLabeled(tester, AppStrings.returnTime, '20:00');
       await tester.tap(find.text(AppStrings.submitReturnRequest));
       await tester.pumpAndSettle();

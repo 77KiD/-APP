@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:group_trip/app/app_scope.dart';
 import 'package:group_trip/core/time/time_rules.dart';
+import 'package:group_trip/core/widgets/datetime_input.dart';
 import 'package:group_trip/core/widgets/form_widgets.dart';
 import 'package:group_trip/features/trip/domain/trip_models.dart';
 import 'package:group_trip/features/trip/domain/trip_policy.dart';
@@ -402,12 +403,11 @@ class _TripDetailPageState extends State<TripDetailPage> {
                   )
                 else ...[
                   const PageHeading(AppStrings.expectedReturn),
-                  LabeledField(
+                  DateTimeInputField(
                     label: AppStrings.returnDate,
                     controller: _returnDate,
                     hint: AppStrings.dateHint,
                     helper: AppStrings.dateHelper,
-                    keyboardType: TextInputType.datetime,
                   ),
                   LabeledField(
                     label: AppStrings.returnTime,
