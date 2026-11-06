@@ -28,6 +28,7 @@ class _HomePageState extends State<HomePage> {
   String? _selectedTripId;
   DecisionBoard? _board;
   String? _error;
+  int _loadSequence = 0;
 
   @override
   void initState() {
@@ -57,33 +58,50 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _reload() async {
+    final sequence = ++_loadSequence;
     final deps = AppScope.of(context);
     await deps.connectivity.refresh();
+    if (!_isCurrentLoad(sequence)) return;
     try {
       final trips = await deps.trips.listMyTrips();
-      if (!mounted) return;
+      if (!_isCurrentLoad(sequence)) return;
       setState(() {
         _trips = trips;
         _error = null;
+        if (_board?.trip.id != _selectedTrip?.id) _board = null;
       });
     } on TripException catch (error) {
-      if (!mounted) return;
+      if (!_isCurrentLoad(sequence)) return;
       setState(() => _error = error.message);
     }
-    await _loadBoard();
+    await _loadBoard(sequence: sequence);
   }
 
+  bool _isCurrentLoad(int sequence, [String? tripId]) =>
+      mounted &&
+      sequence == _loadSequence &&
+      (tripId == null || _selectedTrip?.id == tripId);
+
   /// 看板只讀現有資料：成員、修改申請、邀請碼。讀不到時不擋首頁。
-  Future<void> _loadBoard() async {
+  /// 成功回傳該次看板；失敗明確標記，已被新請求取代則不回傳可分享資料。
+  Future<({DecisionBoard? board, bool failed})> _loadBoard({
+    int? sequence,
+  }) async {
+    final request = sequence ?? ++_loadSequence;
+    if (!_isCurrentLoad(request)) return (board: null, failed: false);
     final selected = _selectedTrip;
     if (selected == null) {
-      if (mounted) setState(() => _board = null);
-      return;
+      setState(() => _board = null);
+      return (board: null, failed: false);
     }
     final deps = AppScope.of(context);
     try {
       // 重新讀旅程：公開邀請的截止時間、回程等可能在旅程頁被改過。
       final trip = await deps.trips.getTrip(selected.id);
+      if (!_isCurrentLoad(request, selected.id)) {
+        return (board: null, failed: false);
+      }
+      if (trip.id != selected.id) return (board: null, failed: true);
       final members = await deps.trips.listMembers(trip.id);
       final requests = await deps.trips.listRequests(trip.id);
       final invites = await deps.trips.listInvites(trip.id);
@@ -93,25 +111,28 @@ class _HomePageState extends State<HomePage> {
       for (final member in members) {
         if (member.userId == selfId) self = member;
       }
-      if (!mounted) return;
-      setState(
-        () => _board = DecisionBoard.build(
-          trip: trip,
-          self: self,
-          members: members,
-          requests: requests,
-          invites: invites,
-          now: now,
-          inviteUrlFor: deps.firebaseConfigured
-              ? (code) => InviteLink.build(
-                  projectId: FirebaseConfig.projectId,
-                  code: code,
-                )
-              : null,
-        ),
+      if (!_isCurrentLoad(request, selected.id)) {
+        return (board: null, failed: false);
+      }
+      final board = DecisionBoard.build(
+        trip: trip,
+        self: self,
+        members: members,
+        requests: requests,
+        invites: invites,
+        now: now,
+        inviteUrlFor: deps.firebaseConfigured
+            ? (code) => InviteLink.build(
+                projectId: FirebaseConfig.projectId,
+                code: code,
+              )
+            : null,
       );
+      setState(() => _board = board);
+      return (board: board, failed: false);
     } on TripException {
-      if (mounted) setState(() => _board = null);
+      // 同一旅程的舊看板仍可閱讀，但絕不可當成這次重讀成功的結果。
+      return (board: null, failed: _isCurrentLoad(request, selected.id));
     }
   }
 
@@ -122,7 +143,7 @@ class _HomePageState extends State<HomePage> {
       case BoardAction.openTrip:
         await _openTrip(board.trip);
       case BoardAction.shareInvite:
-        final fresh = await _freshBoard();
+        final fresh = await _freshBoard(retry: () => _onBoardAction(action));
         final invite = fresh?.shareableInvite;
         if (!mounted || fresh == null) return;
         if (invite == null) {
@@ -138,16 +159,28 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _shareBoard() async {
-    final fresh = await _freshBoard();
+    final fresh = await _freshBoard(retry: _shareBoard);
     if (!mounted || fresh == null) return;
     await AppScope.of(context).share.shareText(fresh.shareText());
   }
 
   /// 分享前用現在的時間與最新的旅程、邀請碼重算看板，不用畫面載入時的快照
   /// （Codex 審查 #60 F02）。
-  Future<DecisionBoard?> _freshBoard() async {
-    await _loadBoard();
-    return _board;
+  Future<DecisionBoard?> _freshBoard({required VoidCallback retry}) async {
+    final result = await _loadBoard();
+    if (!mounted) return null;
+    if (result.failed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(AppStrings.boardRefreshFailed),
+          action: SnackBarAction(
+            label: AppStrings.boardRetry,
+            onPressed: retry,
+          ),
+        ),
+      );
+    }
+    return result.board;
   }
 
   Future<void> _openCreate() async {

@@ -307,4 +307,24 @@ void main() {
       AppStrings.inviteShareText('京都自由行', 'CODE0001'),
     );
   });
+
+  test('重算後的邀請分享含最新資料與 inviteUrlFor 產生的連結', () {
+    final captain = member('cap', MemberRole.captain);
+    final freshInvite = invite(code: 'NEWCODE1', createdAt: now);
+    final board = DecisionBoard.build(
+      trip: trip(),
+      self: captain,
+      members: [captain],
+      requests: const [],
+      invites: [invite(), freshInvite],
+      now: now,
+      inviteUrlFor: (code) => 'https://trip.example/j/$code',
+    );
+
+    expect(
+      board.inviteShareText(board.shareableInvite!),
+      '${AppStrings.inviteShareText('京都自由行', 'NEWCODE1')}\n'
+      '${AppStrings.inviteLinkLine('https://trip.example/j/NEWCODE1')}',
+    );
+  });
 }
