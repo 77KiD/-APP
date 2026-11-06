@@ -69,10 +69,7 @@ abstract final class AppTheme {
       labelLarge: bodyFont.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
       labelMedium: bodyFont.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
       labelSmall: bodyFont.copyWith(fontSize: 12, fontWeight: FontWeight.w600),
-    ).apply(
-      bodyColor: semanticColors.text,
-      displayColor: semanticColors.text,
-    );
+    ).apply(bodyColor: semanticColors.text, displayColor: semanticColors.text);
 
     final buttonText = bodyFont.copyWith(
       fontSize: 16,
@@ -81,6 +78,9 @@ abstract final class AppTheme {
 
     return base.copyWith(
       textTheme: textTheme,
+      // 提示列的背景是 inverseSurface（即 onSurface）。預設的動作色會落到
+      // onPrimary，淺色主題兩者同色，動作會看不見。
+      snackBarTheme: SnackBarThemeData(actionTextColor: semanticColors.surface),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: semanticColors.accent,
