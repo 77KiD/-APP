@@ -31,12 +31,16 @@ class BoardItem {
     required this.title,
     this.detail,
     this.action,
+    this.inShareText = true,
   });
 
   final BoardSection section;
   final String title;
   final String? detail;
   final BoardAction? action;
+
+  /// 給自己看的操作提示不放進分享文字，收到的人無法處理（#74）。
+  final bool inShareText;
 }
 
 class DecisionBoard {
@@ -208,6 +212,7 @@ class DecisionBoard {
             action: shareable == null
                 ? BoardAction.openTrip
                 : BoardAction.shareInvite,
+            inShareText: false,
           ),
         );
       }
@@ -260,7 +265,10 @@ class DecisionBoard {
   String shareText() {
     final buffer = StringBuffer(AppStrings.boardShareTitle(trip.title));
     for (final section in order) {
-      final entries = this.section(section);
+      final entries = [
+        for (final item in this.section(section))
+          if (item.inShareText) item,
+      ];
       if (entries.isEmpty) continue;
       buffer
         ..writeln()

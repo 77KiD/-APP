@@ -252,6 +252,23 @@ void main() {
     });
   }
 
+  testWidgets('離線分享看板的文字，不叫收到的人去產生邀請碼（#74）', (tester) async {
+    tallView(tester);
+    final world = await signedIn();
+    await createTrip(world);
+    await tester.pumpWidget(wrapPage(world.deps, const HomePage()));
+    await tester.pumpAndSettle();
+    world.connectivity.isOnline = false;
+
+    await tester.tap(find.byKey(const Key('share-board')));
+    await tester.pumpAndSettle();
+
+    final shared = world.share.shared.single;
+    expect(shared, isNot(contains(AppStrings.boardInviteFriends)));
+    expect(shared, isNot(contains(AppStrings.boardNoShareableInvite)));
+    expect(find.text(AppStrings.boardInviteFriends), findsOneWidget);
+  });
+
   group('分享失敗的提示', () {
     double contrast(Color a, Color b) {
       final la = a.computeLuminance();
