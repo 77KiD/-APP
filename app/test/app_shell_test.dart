@@ -1,7 +1,10 @@
+import 'dart:ui' show SemanticsAction, Tristate;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:group_trip/core/theme/app_theme.dart';
 import 'package:group_trip/core/widgets/app_shell.dart';
+import 'package:group_trip/l10n/app_strings.dart';
 
 void main() {
   group('AppShell navigation semantics', () {
@@ -63,6 +66,7 @@ void main() {
 
       for (final (size, scale) in [
         (const Size(320, 640), 1.0),
+        (const Size(320, 640), 2.0),
         (const Size(412, 915), 1.0),
         (const Size(412, 915), 1.5),
         (const Size(800, 1000), 1.0),
@@ -98,26 +102,187 @@ void main() {
         }
       });
 
-      testWidgets('保留格是空的：沒有內容，按了也不會切換分頁', (tester) async {
+      testWidgets('保留格顯示即將推出，比一般分頁淡，按了也不會切換分頁', (tester) async {
         await pumpShell(tester, const Size(412, 915));
 
-        expect(
-          find.descendant(of: slot, matching: find.byType(Text)),
-          findsNothing,
+        final label = find.descendant(
+          of: slot,
+          matching: find.text(AppStrings.navComingSoon),
         );
-        expect(
-          find.descendant(of: slot, matching: find.byType(Icon)),
-          findsNothing,
+        final icon = find.descendant(
+          of: slot,
+          matching: find.byIcon(Icons.hourglass_empty),
         );
+        expect(label, findsOneWidget);
+        expect(icon, findsOneWidget);
         expect(
           find.descendant(of: slot, matching: find.byType(InkWell)),
           findsNothing,
         );
         expect(BottomNavTab.values, hasLength(4));
 
+        final normal = tester.widget<Icon>(find.byIcon(Icons.people_outline));
+        final reserved = tester.widget<Icon>(icon);
+        expect(reserved.color!.a, lessThan(normal.color!.a));
+
         await tester.tapAt(tester.getCenter(slot));
         await tester.pump();
         expect(find.text('首頁'), findsNWidgets(2));
+      });
+
+      testWidgets('輔助技術念出即將推出，而且標示為不能使用', (tester) async {
+        final semantics = tester.ensureSemantics();
+        await pumpShell(tester, const Size(412, 915));
+
+        final data = tester.getSemantics(slot).getSemanticsData();
+        expect(data.label, AppStrings.navComingSoon);
+        expect(data.flagsCollection.isEnabled, Tristate.isFalse);
+        expect(data.hasAction(SemanticsAction.tap), isFalse);
+        semantics.dispose();
+      });
+    });
+
+    group('點下排時，圖示與文字位置不動', () {
+      Finder tabIcon(BottomNavTab tab, BottomNavTab selected) =>
+          find.byIcon(tab == selected ? tab.selectedIcon : tab.icon);
+
+      // 分頁標題和內容也可能用同樣的文字，下排排在最後。
+      Finder tabLabel(BottomNavTab tab) => find.text(tab.label).last;
+
+      final slot = find.byKey(const Key('reserved-nav-slot'));
+      // 保留格往上第一個 Container 就是整條下排。
+      final navBar = find
+          .ancestor(of: slot, matching: find.byType(Container))
+          .first;
+
+      Map<String, Offset> positions(
+        WidgetTester tester,
+        BottomNavTab selected,
+      ) => {
+        for (final tab in BottomNavTab.values) ...{
+          'icon ${tab.name}': tester.getCenter(tabIcon(tab, selected)),
+          if (tab != BottomNavTab.home)
+            'label ${tab.name}': tester.getCenter(tabLabel(tab)),
+        },
+        'icon 即將推出': tester.getCenter(
+          find.descendant(
+            of: slot,
+            matching: find.byIcon(Icons.hourglass_empty),
+          ),
+        ),
+        'label 即將推出': tester.getCenter(
+          find.descendant(
+            of: slot,
+            matching: find.text(AppStrings.navComingSoon),
+          ),
+        ),
+        // 上下緣都不動，高度才算沒變。
+        'nav 左上': tester.getTopLeft(navBar),
+        'nav 右下': tester.getBottomRight(navBar),
+      };
+
+      for (final (size, scale) in [
+        (const Size(320, 640), 1.0),
+        (const Size(320, 640), 2.0),
+        (const Size(412, 915), 1.0),
+        (const Size(412, 915), 1.5),
+        (const Size(800, 1000), 1.0),
+      ]) {
+        testWidgets('${size.width.toInt()} 寬，文字 $scale 倍', (tester) async {
+          tester.view.physicalSize = size;
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: AppTheme.light(),
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!,
+              ),
+              home: const AppShell(currentTrip: '東京自由行'),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final start = positions(tester, BottomNavTab.home);
+
+          for (final tab in [
+            BottomNavTab.itinerary,
+            BottomNavTab.find,
+            BottomNavTab.members,
+            BottomNavTab.home,
+          ]) {
+            await tester.tap(
+              find.ancestor(
+                of: tab == BottomNavTab.home
+                    ? find.byIcon(tab.icon).last
+                    : tabLabel(tab),
+                matching: find.byType(InkWell),
+              ),
+            );
+            await tester.pumpAndSettle();
+
+            final now = positions(tester, tab);
+            for (final key in start.keys) {
+              expect(
+                (now[key]! - start[key]!).distance,
+                lessThan(0.5),
+                reason: '選到 ${tab.name} 時，$key 移動了：'
+                    '${start[key]} → ${now[key]}',
+              );
+            }
+          }
+        });
+      }
+
+      testWidgets('切換分頁後，即將推出格仍然不能使用', (tester) async {
+        final semantics = tester.ensureSemantics();
+        await tester.pumpWidget(
+          MaterialApp(theme: AppTheme.light(), home: const AppShell()),
+        );
+        await tester.pumpAndSettle();
+
+        for (final tab in [
+          BottomNavTab.itinerary,
+          BottomNavTab.find,
+          BottomNavTab.members,
+        ]) {
+          await tester.tap(tabLabel(tab));
+          await tester.pumpAndSettle();
+
+          final data = tester.getSemantics(slot).getSemanticsData();
+          expect(data.label, AppStrings.navComingSoon, reason: tab.name);
+          expect(
+            data.flagsCollection.isEnabled,
+            Tristate.isFalse,
+            reason: tab.name,
+          );
+          expect(data.hasAction(SemanticsAction.tap), isFalse, reason: tab.name);
+
+          // 按保留格不會換到別的分頁：選到的圖示還在。
+          await tester.tapAt(tester.getCenter(slot));
+          await tester.pumpAndSettle();
+          expect(find.byIcon(tab.selectedIcon), findsOneWidget, reason: tab.name);
+        }
+        semantics.dispose();
+      });
+
+      testWidgets('選到的分頁，底色在圖示正中間', (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(theme: AppTheme.light(), home: const AppShell()),
+        );
+        await tester.tap(find.text(BottomNavTab.itinerary.label).last);
+        await tester.pumpAndSettle();
+
+        final icon = find.byIcon(BottomNavTab.itinerary.selectedIcon);
+        final pill = find.byKey(const Key('nav-selected-pill'));
+        expect(pill, findsOneWidget);
+        expect(
+          (tester.getCenter(pill) - tester.getCenter(icon)).distance,
+          lessThan(0.5),
+        );
       });
     });
 
