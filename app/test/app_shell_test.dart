@@ -121,6 +121,96 @@ void main() {
       });
     });
 
+    group('點下排時，圖示與文字位置不動', () {
+      Finder tabIcon(BottomNavTab tab, BottomNavTab selected) =>
+          find.byIcon(tab == selected ? tab.selectedIcon : tab.icon);
+
+      // 分頁標題和內容也可能用同樣的文字，下排排在最後。
+      Finder tabLabel(BottomNavTab tab) => find.text(tab.label).last;
+
+      Map<String, Offset> positions(
+        WidgetTester tester,
+        BottomNavTab selected,
+      ) => {
+        for (final tab in BottomNavTab.values) ...{
+          'icon ${tab.name}': tester.getCenter(tabIcon(tab, selected)),
+          if (tab != BottomNavTab.home)
+            'label ${tab.name}': tester.getCenter(tabLabel(tab)),
+        },
+      };
+
+      for (final (size, scale) in [
+        (const Size(320, 640), 1.0),
+        (const Size(412, 915), 1.0),
+        (const Size(412, 915), 1.5),
+        (const Size(800, 1000), 1.0),
+      ]) {
+        testWidgets('${size.width.toInt()} 寬，文字 $scale 倍', (tester) async {
+          tester.view.physicalSize = size;
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: AppTheme.light(),
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!,
+              ),
+              home: const AppShell(currentTrip: '東京自由行'),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final start = positions(tester, BottomNavTab.home);
+
+          for (final tab in [
+            BottomNavTab.itinerary,
+            BottomNavTab.find,
+            BottomNavTab.members,
+            BottomNavTab.home,
+          ]) {
+            await tester.tap(
+              find.ancestor(
+                of: tab == BottomNavTab.home
+                    ? find.byIcon(tab.icon).last
+                    : tabLabel(tab),
+                matching: find.byType(InkWell),
+              ),
+            );
+            await tester.pumpAndSettle();
+
+            final now = positions(tester, tab);
+            for (final key in start.keys) {
+              expect(
+                (now[key]! - start[key]!).distance,
+                lessThan(0.5),
+                reason: '選到 ${tab.name} 時，$key 移動了：'
+                    '${start[key]} → ${now[key]}',
+              );
+            }
+          }
+        });
+      }
+
+      testWidgets('選到的分頁，底色在圖示正中間', (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(theme: AppTheme.light(), home: const AppShell()),
+        );
+        await tester.tap(find.text(BottomNavTab.itinerary.label).last);
+        await tester.pumpAndSettle();
+
+        final icon = find.byIcon(BottomNavTab.itinerary.selectedIcon);
+        final pill = find.byKey(const Key('nav-selected-pill'));
+        expect(pill, findsOneWidget);
+        expect(
+          (tester.getCenter(pill) - tester.getCenter(icon)).distance,
+          lessThan(0.5),
+        );
+      });
+    });
+
     testWidgets('members badge shows approval count for leader',
         (WidgetTester tester) async {
       await tester.pumpWidget(
