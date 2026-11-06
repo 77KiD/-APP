@@ -177,8 +177,8 @@ class _DateTimeInputFieldState extends State<DateTimeInputField> {
       ],
       textInputAction: widget.textInputAction,
       onSubmitted: widget.onSubmitted,
-      // 日期欄點了就直接打數字，日曆從右側圖示開，不蓋住鍵盤。
-      onTap: widget.isDate ? widget.onTap : _openPicker,
+      // 點欄位直接打數字，日曆與時鐘從右側圖示開，不蓋住鍵盤。
+      onTap: widget.onTap,
       readOnly: false,
     );
   }
@@ -324,7 +324,7 @@ class TimeValidator {
 
     final parts = text.split(':');
     if (parts.length != 2) {
-      return '請用 HH:mm 輸入時間';
+      return AppStrings.invalidTime;
     }
 
     final hour = int.tryParse(parts[0]);
@@ -336,7 +336,7 @@ class TimeValidator {
         hour > 23 ||
         minute < 0 ||
         minute > 59) {
-      return '請用 HH:mm 輸入時間';
+      return AppStrings.invalidTime;
     }
 
     return null;

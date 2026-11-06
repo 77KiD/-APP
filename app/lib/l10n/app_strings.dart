@@ -10,8 +10,8 @@ abstract final class AppStrings {
   static const birthday = '出生日期';
   static const dateHint = 'YYYYMMDD';
   static const dateHelper = '只要輸入數字，例如 20261105，會自動分隔';
-  static const timeHint = 'HH:mm';
-  static const timeHelper = '24 小時制，例如 18:30';
+  static const timeHint = 'HHmm';
+  static const timeHelper = '只要輸入數字，24 小時制，例如 1830，會自動分隔';
   static const birthdayPurpose =
       '出生日期只用來確認年齡：未滿 13 歲無法註冊。已能註冊的人，是否未成年一律以 18 歲判斷。生日只存在你的帳號，不會放進旅程，其他成員只看得到你是否未成年。';
   static const birthdayConsent = '我已閱讀並同意為年齡驗證提供出生日期';
@@ -110,7 +110,7 @@ abstract final class AppStrings {
   static const emptyTitle = '請輸入旅程名稱';
   static const titleTooLong = '旅程名稱最多 60 個字';
   static const endBeforeStart = '結束日期不能早於開始日期';
-  static const invalidTime = '請用 HH:mm 輸入時間';
+  static const invalidTime = '請輸入完整的時間，例如 1830';
   static const incompleteReturn = '請同時填寫預計回程的日期與時間，或兩欄都留空';
   static const invalidTimeZone = '無法辨識這個旅程時區';
   static const expectedReturnTooEarly = '預計回程時間不能早於現在';

@@ -262,7 +262,12 @@ void main() {
       );
       expect(returnDate.controller!.text, '2026-11-05');
       expect(returnDate.keyboardType, TextInputType.number);
-      await enterLabeled(tester, AppStrings.returnTime, '20:00');
+      await enterLabeled(tester, AppStrings.returnTime, '2000');
+      final returnTime = tester.widget<TextField>(
+        labeledField(AppStrings.returnTime),
+      );
+      expect(returnTime.controller!.text, '20:00');
+      expect(returnTime.keyboardType, TextInputType.number);
       await tester.tap(find.text(AppStrings.submitReturnRequest));
       await tester.pumpAndSettle();
       expect(
