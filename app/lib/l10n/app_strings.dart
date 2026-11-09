@@ -88,6 +88,7 @@ abstract final class AppStrings {
       '審核修改申請、設定回程時間、公開邀請與指定副隊長，請使用 App。下載 App 也能在走散時用定位找人。';
   static String inviteLinkLine(String url) => '網頁直接加入：$url';
   static const findComingSoon = '找人地圖在之後的版本推出。現在可以在旅程頁看成員與預計回程時間。';
+  static const navComingSoon = '即將推出';
   static const emptyTrips = '還沒有旅程。建立一趟旅程，或用邀請碼加入朋友的旅程。';
   static const createTrip = '建立旅程';
   static const joinTrip = '用邀請碼加入';
