@@ -25,7 +25,8 @@
 | 交接隊長 | 必須 | 兩步：隊長建立 `handover`（`pending`），對方接受後由他自己把 `trips.leaderId` 改成自己。規則用 `get()` 核對對應的 `handover` 是 `accepted` 而且 `toMemberId` 是本人 |
 | 隊長未交接就刪除帳號 | 必須 | 旅程裡還有其他成員時，App 要求先完成交接才能刪除帳號，規則拒絕隊長在還有其他成員時刪除自己的成員文件。旅程只剩隊長一人時，刪除帳號的同時把旅程結束（`leader_manual`）並刪除他的位置文件 |
 | 退出旅程 | 必須 | 本人刪除自己的成員文件與自己的 `locations` 文件。隊長退出前必須先完成交接 |
-| 旅程結束時清除位置 | 必須 | 取代 `clearLocationsWhenTripEnds`。規則在 `status == ended` 後拒絕讀取 `locations`；結束旅程的人在同一批寫入裡刪除位置文件，其他成員下次打開 App 時刪除自己的文件 |
+| 旅程結束時清除位置 | 必須 | 取代 `clearLocationsWhenTripEnds`。規則在 `status == ended` 後拒絕所有人讀寫 `locations`，只留一條例外：本人可以用路徑 `trips/{tripId}/locations/{uid}` 刪除自己的文件，不需要先讀取。結束旅程的人在同一批寫入裡刪除自己的位置，其他成員下次打開 App 時刪除自己的 |
+| 已結束舊旅程的位置資料 | 必須 | 一次性清理腳本，用 Admin SDK 刪除已結束旅程底下所有 `locations`，先試跑只列數量。需要專案管理權限，由治齊在自己的電腦上執行（2026-11-12 修訂） |
 | 自動結束旅程 | 可佔位 | 取代 `endExpiredTrips`。成員打開 App 時，若已超過 `expectedReturnAt` 或結束日 23:59，就寫入 `ended`，`endReason` 寫 `expected_return` 或 `end_date`。規則用 `request.time` 判斷是否已過期，不信任手機的時間，手機時間調快也不能提早結束 |
 | 單獨行動通知 | 可佔位 | 規則把關的客戶端寫入 `soloNotices`，未成年需要核准的流程照 0008 |
 | 推播 | 可佔位 | Spark 上不做。改用 App 內提醒與分享到 LINE（0011） |
