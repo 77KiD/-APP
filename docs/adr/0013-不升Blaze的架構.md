@@ -14,7 +14,7 @@
    - 輔助入口是 OSM：地名搜尋用 Nominatim（只在按下搜尋時查，每秒最多 1 次），附近地點用 Overpass。兩者都帶能識別本 App 的 User-Agent。
    - 地圖用 `flutter_map` 加 `vector_map_tiles`，圖磚用 OpenFreeMap，用 `RichAttributionWidget` 顯示「OpenFreeMap © OpenMapTiles Data from OpenStreetMap」。整套不需要 API 金鑰。
    - `place_id` 欄位名稱不變，值加上來源前綴：`gmaps:<…>`、`osm:node:<id>`／`osm:way:<id>`／`osm:relation:<id>`、`custom:<隨機 id>`。沒有前綴的是既有的 Google Place ID。現有規則允許 1–300 字，不用改規則。
-   - 從 Google Maps 連結解析出的座標視同 Google 的資料，沿用 `data-model.md` 的 30 天更新規定。`gmaps:` 地點的座標一定要附上取得時間（`coordinatesCachedAt`，伺服器時間），規則檢查。App 不能自己重抓，所以到期後刪除座標，只留連結和名稱，地點上顯示「位置已過期，重新貼上連結即可更新」，地圖上不顯示這個點（2026-11-12 修訂）。OSM 與自訂地點的座標沒有這個限制，但畫面要標示 OSM 來源（ODbL）。
+   - 從 Google Maps 連結解析出的座標視同 Google 的資料，沿用 `data-model.md` 的 30 天更新規定。OSM 與自訂地點的座標沒有這個限制，但畫面要標示 OSM 來源（ODbL）。
 3. **行程版本 `versions`**（0010）：版本文件 id 就是版號，格式 `v` 加 4 位數字（`v0001`）。規則檢查 `number` 與 id 一致、`v0001` 或上一版已存在、這一版尚未存在，建立後不能修改。兩人同時儲存時，後到的被拒絕，App 用下一號重試。不維護計數器文件，也不用 transaction。「儲存版本」只在連線時能按，離線時停用並說明原因（0004 的例外）。
 4. **成員在線狀態**：照 0009 第 3 點，用 Realtime Database 的 `presence/{tripId}/{uid}` 與 `onDisconnect`。Spark 同時連線上限 100 個，測試階段夠用，超過前要升級。
 5. **需要 Function 的功能，在 Spark 上的處理**：
@@ -23,10 +23,9 @@
 |---|---|---|
 | 刪除帳號 | 必須 | 客戶端先刪除自己的個人資料與成員文件，再刪除 Auth 帳號。規則要允許本人刪除自己的文件。Google Play 規定必須提供 |
 | 交接隊長 | 必須 | 兩步：隊長建立 `handover`（`pending`），對方接受後由他自己把 `trips.leaderId` 改成自己。規則用 `get()` 核對對應的 `handover` 是 `accepted` 而且 `toMemberId` 是本人 |
-| 隊長未交接就刪除帳號 | 必須 | 旅程裡還有其他成員時，App 要求先完成交接才能刪除帳號，規則拒絕隊長在還有其他成員時刪除自己的成員文件。旅程只剩隊長一人時，刪除帳號的同時把旅程結束（`leader_manual`）並刪除他的位置文件 |
 | 退出旅程 | 必須 | 本人刪除自己的成員文件與自己的 `locations` 文件。隊長退出前必須先完成交接 |
 | 旅程結束時清除位置 | 必須 | 取代 `clearLocationsWhenTripEnds`。規則在 `status == ended` 後拒絕讀取 `locations`；結束旅程的人在同一批寫入裡刪除位置文件，其他成員下次打開 App 時刪除自己的文件 |
-| 自動結束旅程 | 可佔位 | 取代 `endExpiredTrips`。成員打開 App 時，若已超過 `expectedReturnAt` 或結束日 23:59，就寫入 `ended`，`endReason` 寫 `expected_return` 或 `end_date`。規則用 `request.time` 判斷是否已過期，不信任手機的時間，手機時間調快也不能提早結束 |
+| 自動結束旅程 | 可佔位 | 取代 `endExpiredTrips`。成員打開 App 時，若已超過 `expectedReturnAt` 或結束日 23:59，就寫入 `ended`，`endReason` 照規則的時間條件寫 `expected_return` 或 `end_date` |
 | 單獨行動通知 | 可佔位 | 規則把關的客戶端寫入 `soloNotices`，未成年需要核准的流程照 0008 |
 | 推播 | 可佔位 | Spark 上不做。改用 App 內提醒與分享到 LINE（0011） |
 | 匿名帳號定期刪除（0012 第 5 點） | 上線前要決定 | 沒有排程就無法自動刪除。網頁版上線前，要嘛升 Blaze，要嘛改寫隱私權政策的保存期限 |
