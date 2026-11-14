@@ -186,6 +186,9 @@ Future<void> _recoveredInvitation(FirebaseAuthRepository authRepo) async {
   connectivity.actualOnline = true; // The Home page has not refreshed.
   final issued = await repository.issueInviteCode(trip.id);
   _check(issued.serverConfirmed, '新碼需讀回伺服器確認');
+  // #48：發碼成功後其他待上傳變更改由背景同步發布，不再擋住新碼回傳。
+  // sync() 會沿用進行中的那次同步，等它完成再檢查舊碼。
+  await repository.sync();
   final oldPublished = await remote.fetchInvite(pending.code);
   _check(oldPublished != null, '超過五分鐘的待上傳碼需能首次發布');
   _check(
