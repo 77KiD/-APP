@@ -9,6 +9,18 @@ class TripLocalStore {
 
   final JsonDocumentStore _store;
 
+  // 僅存手機，不進 Firestore；保留到重開 App 後，避免遲到的寫入被同步回來。
+  static const _discardedTrips = 'discardedTripIds';
+  static const _discardedInvites = 'discardedInviteCodes';
+
+  Future<bool> isTripDiscarded(String id) =>
+      _store.view((data) => _list(data, _discardedTrips).contains(id));
+
+  Future<bool> isInviteDiscarded(String code) => _store.view(
+    (data) =>
+        _list(data, _discardedInvites).contains(code.trim().toUpperCase()),
+  );
+
   Future<Trip?> readTrip(String id) {
     return _store.view((data) {
       final raw = _child(data, FirestoreSchema.trips)[id];
@@ -19,6 +31,7 @@ class TripLocalStore {
 
   Future<void> saveTrip(Trip trip) {
     return _store.transaction((draft) {
+      if (_list(draft, _discardedTrips).contains(trip.id)) return;
       final trips = _child(draft, FirestoreSchema.trips);
       trips[trip.id] = TripCodec.tripToLocalMap(trip);
       draft[FirestoreSchema.trips] = trips;
@@ -114,8 +127,13 @@ class TripLocalStore {
 
   Future<void> deleteInvite(String code) {
     return _store.transaction((draft) {
+      final normalized = code.trim().toUpperCase();
+      draft[_discardedInvites] = {
+        ..._list(draft, _discardedInvites),
+        normalized,
+      }.toList();
       final invites = _child(draft, FirestoreSchema.invites);
-      invites.remove(code.trim().toUpperCase());
+      invites.remove(normalized);
       draft[FirestoreSchema.invites] = invites;
     });
   }
@@ -123,6 +141,10 @@ class TripLocalStore {
   /// 建立旅程的伺服器寫入失敗時清掉手機上的旅程、成員、邀請碼與佇列。
   Future<void> discardTrip(String tripId) {
     return _store.transaction((draft) {
+      draft[_discardedTrips] = {
+        ..._list(draft, _discardedTrips),
+        tripId,
+      }.toList();
       final trips = _child(draft, FirestoreSchema.trips);
       trips.remove(tripId);
       draft[FirestoreSchema.trips] = trips;
@@ -132,6 +154,14 @@ class TripLocalStore {
       draft[FirestoreSchema.members] = members;
 
       final invites = _child(draft, FirestoreSchema.invites);
+      final discardedCodes = {..._list(draft, _discardedInvites)};
+      for (final entry in invites.entries) {
+        if (entry.value is Map &&
+            (entry.value as Map)[FirestoreSchema.tripId] == tripId) {
+          discardedCodes.add(entry.key);
+        }
+      }
+      draft[_discardedInvites] = discardedCodes.toList();
       invites.removeWhere((_, value) {
         if (value is! Map) return false;
         return value[FirestoreSchema.tripId] == tripId;
@@ -152,6 +182,10 @@ class TripLocalStore {
   Future<void> saveInvite(InviteRecord invite) {
     final code = invite.code.trim().toUpperCase();
     return _store.transaction((draft) {
+      if (_list(draft, _discardedTrips).contains(invite.tripId) ||
+          _list(draft, _discardedInvites).contains(code)) {
+        return;
+      }
       final invites = _child(draft, FirestoreSchema.invites);
       invites[code] = {
         ...TripCodec.inviteToMap(invite),

@@ -25,6 +25,7 @@ class TestWorld {
     bool firebaseConfigured = false,
     bool isWeb = false,
     String? initialInviteCode,
+    OfflineTripRepository Function(OfflineTripRepository)? repositoryFactory,
     MemoryTripRemote Function(MemoryTripDatabase, String Function())?
     remoteFactory,
   }) {
@@ -42,7 +43,7 @@ class TestWorld {
           database: database,
           currentUserId: () => auth.current?.id ?? '',
         );
-    trips = OfflineTripRepository(
+    final repository = OfflineTripRepository(
       local: TripLocalStore(MemoryDocumentStore()),
       remote: remote,
       currentAccount: () => auth.current,
@@ -50,6 +51,7 @@ class TestWorld {
       ids: SequentialIdGenerator(),
       connectivity: connectivity,
     );
+    trips = repositoryFactory?.call(repository) ?? repository;
     analytics = RecordingAnalyticsClient();
     crashes = RecordingCrashReporter();
     telemetry = Telemetry(analytics: analytics, crashes: crashes);

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:group_trip/app/app_scope.dart';
@@ -36,6 +38,10 @@ class _TripDetailPageState extends State<TripDetailPage> {
   bool _loading = true;
   bool _busy = false;
   bool _prefilled = false;
+  Timer? _pendingInviteTimer;
+  bool _checkingInvites = false;
+  Duration _pendingInviteDelay = const Duration(seconds: 2);
+  Listenable? _connectivity;
   final _returnDate = TextEditingController();
   final _returnTime = TextEditingController();
 
@@ -48,7 +54,25 @@ class _TripDetailPageState extends State<TripDetailPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final connectivity = AppScope.of(context).connectivity;
+    if (identical(_connectivity, connectivity)) return;
+    _connectivity?.removeListener(_onConnectivityChanged);
+    _connectivity = connectivity;
+    connectivity.addListener(_onConnectivityChanged);
+  }
+
+  void _onConnectivityChanged() {
+    if (!mounted) return;
+    _pendingInviteDelay = const Duration(seconds: 2);
+    _watchPendingInvites();
+  }
+
+  @override
   void dispose() {
+    _connectivity?.removeListener(_onConnectivityChanged);
+    _pendingInviteTimer?.cancel();
     _returnDate.dispose();
     _returnTime.dispose();
     super.dispose();
@@ -80,12 +104,61 @@ class _TripDetailPageState extends State<TripDetailPage> {
         _requests = requests;
         _loading = false;
       });
+      _watchPendingInvites();
     } on TripException catch (error) {
       if (!mounted) return;
       setState(() {
         _error = error.message;
         _loading = false;
       });
+    }
+  }
+
+  void _watchPendingInvites() {
+    _pendingInviteTimer?.cancel();
+    if (!AppScope.of(context).connectivity.isOnline ||
+        !_invites.any((invite) => !invite.serverConfirmed)) {
+      return;
+    }
+    _pendingInviteTimer = Timer(_pendingInviteDelay, () {
+      if (!_busy && !_checkingInvites) {
+        unawaited(_checkPendingInvites());
+      } else {
+        _watchPendingInvites();
+      }
+    });
+  }
+
+  Future<void> _checkPendingInvites() async {
+    _checkingInvites = true;
+    final trips = AppScope.of(context).trips;
+    try {
+      await trips.refreshPendingInvites(widget.tripId);
+    } on TripException {
+      // 暫時連不上時保留待同步狀態，不能開放複製或分享。
+    } finally {
+      try {
+        if (mounted) {
+          final invites = await trips.readCachedInvites(widget.tripId);
+          if (mounted) {
+            setState(() {
+              _invites = invites;
+              if (!invites.any((invite) => !invite.serverConfirmed) &&
+                  _notice == AppStrings.invitePending) {
+                _notice = null;
+              }
+            });
+          }
+        }
+      } on Exception {
+        // 快取暫時讀不到也要解除檢查鎖，下一輪仍可重試。
+      } finally {
+        _checkingInvites = false;
+        _pendingInviteDelay = Duration(
+          seconds: (_pendingInviteDelay.inSeconds * 2).clamp(2, 60),
+        );
+        if (mounted) _watchPendingInvites();
+      }
     }
   }
 
@@ -294,7 +367,7 @@ class _TripDetailPageState extends State<TripDetailPage> {
         actions: [
           IconButton(
             key: const Key('refresh-invites'),
-            tooltip: '同步旅程與邀請碼',
+            tooltip: AppStrings.syncTripAndInvites,
             onPressed: _busy || _loading ? null : _refreshInvites,
             icon: const Icon(Icons.refresh),
           ),

@@ -1026,6 +1026,9 @@ class _HomeReads implements TripRepository {
   Future<List<InviteRecord>> readCachedInvites(String id) =>
       delegate.readCachedInvites(id);
   @override
+  Future<void> refreshPendingInvites(String id) =>
+      delegate.refreshPendingInvites(id);
+  @override
   Future<({List<InviteRecord> invites, bool failed})> revalidateInvites(
     String id,
   ) => delegate.revalidateInvites(id);

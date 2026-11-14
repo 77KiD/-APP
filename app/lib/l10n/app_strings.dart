@@ -129,7 +129,7 @@ abstract final class AppStrings {
   static const inviteExpired = '邀請碼已過期，請向隊長索取新的邀請碼';
   static const issueInvite = '產生邀請碼';
   static const inviteIssued = '已產生新的邀請碼。較早的邀請碼在各自的 1 小時內仍然有效。';
-  static const invitePending = '尚未同步，邀請碼還不能使用。連線後請重新整理或產生新碼。';
+  static const invitePending = '尚未同步，別人暫時無法加入';
   static String inviteInactive(String code) => '邀請碼 $code 已失效，請產生新碼。';
   static const invalidInviteCode = '請輸入 8–12 碼英文字母或數字的邀請碼';
   static const publicInvite = '公開邀請';
@@ -181,13 +181,16 @@ abstract final class AppStrings {
   static const inviteCodeField = '邀請碼';
   static const submitJoin = '加入旅程';
   static const emptyInvite = '請輸入邀請碼';
-  static const inviteNotFound = '找不到這個邀請碼';
+  static const inviteNotFound = '找不到這個邀請碼。如果剛建立，請對方確認已連上網路';
   // 沒有 FIREBASE_* 編譯參數的版本只用 MemoryTripRemote，邀請碼不會離開這台手機。
   static const localModeInviteNotice =
       '這個版本沒有連上 Firebase（本機模式）。邀請碼只存在這台手機，其他手機無法用它加入。要跨手機加入，請安裝連線版 App。';
   static const localModeInviteNotFound =
       '找不到這個邀請碼。這個版本是本機模式，只能加入這台手機上建立的旅程；別人手機上的邀請碼要用連線版 App 才能加入。';
   static const invitePermissionOrNetwork = '沒有權限或網路中斷，無法加入旅程';
+  static const serverWriteTimedOut = '網路不穩，旅程尚未寫入伺服器，請稍後再試';
+  static const syncTimedOut = '同步逾時，請稍後再試';
+  static const syncTripAndInvites = '同步旅程與邀請碼';
   static const serverWriteFailed = '沒有寫入伺服器，邀請碼不會顯示。請再試一次。';
   static const approveWriteFailed = '沒有寫入伺服器，這筆申請仍待處理，預計回程時間維持原設定。請再試一次。';
   static const alreadyMember = '你已經是這個旅程的成員';
