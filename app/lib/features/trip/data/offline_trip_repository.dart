@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:group_trip/core/ids/id_generator.dart';
 import 'package:group_trip/core/time/time_rules.dart';
 import 'package:group_trip/features/auth/domain/auth_models.dart';
@@ -10,10 +11,47 @@ import 'package:group_trip/features/trip/domain/trip_policy.dart';
 import 'package:group_trip/features/trip/domain/trip_repository.dart';
 import 'package:group_trip/l10n/app_strings.dart';
 
-class ConnectivityProbe {
-  ConnectivityProbe({this.isOnline = true});
+/// 單一計時器涵蓋整個發碼操作，所有步驟都只能用同一個截止時間。
+/// 不依賴牆鐘，因此 widget 測試可以用虛擬時間控制。
+class _WriteDeadline {
+  _WriteDeadline(Duration timeout) {
+    _timer = Timer(timeout, () {
+      expired = true;
+      _elapsed.complete();
+    });
+  }
 
-  bool isOnline;
+  late final Timer _timer;
+  final _elapsed = Completer<void>();
+  bool expired = false;
+
+  void check() {
+    if (expired) throw ServerWriteException(AppStrings.serverWriteTimedOut);
+  }
+
+  Future<T> wait<T>(Future<T> Function() action) {
+    check();
+    return Future.any([
+      action(),
+      _elapsed.future.then<T>((_) {
+        throw ServerWriteException(AppStrings.serverWriteTimedOut);
+      }),
+    ]);
+  }
+
+  void dispose() => _timer.cancel();
+}
+
+class ConnectivityProbe extends ChangeNotifier {
+  ConnectivityProbe({this._isOnline = true});
+
+  bool _isOnline;
+  bool get isOnline => _isOnline;
+  set isOnline(bool value) {
+    if (value == _isOnline) return;
+    _isOnline = value;
+    notifyListeners();
+  }
 
   Future<void> refresh() async {}
 }
@@ -103,17 +141,19 @@ class OfflineTripRepository implements TripRepository {
     if (connectivity.isOnline) {
       try {
         await _pushNow(createOps);
-      } on TripException {
+      } on TripException catch (error) {
         await local.discardTrip(trip.id);
+        if (error is ServerWriteException) rethrow;
         throw ServerWriteException();
       }
     }
-    await _trySync();
+    await _trySync().timeout(serverWriteTimeout, onTimeout: () {});
     return (await local.readTrip(trip.id)) ?? trip;
   }
 
   @override
   Future<Trip> getTrip(String tripId) async {
+    if (await local.isTripDiscarded(tripId)) throw TripAccessDenied();
     final userId = _account().id;
     final cached = await local.readTrip(tripId);
     final cachedMember = await local.isMember(tripId, userId);
@@ -507,18 +547,46 @@ class OfflineTripRepository implements TripRepository {
 
   @override
   Future<InviteRecord> issueInviteCode(String tripId) async {
-    await connectivity.refresh();
+    final deadline = _WriteDeadline(serverWriteTimeout);
+    InviteRecord? created;
+    try {
+      final result = await deadline.wait(
+        () => _issueInviteCode(tripId, deadline, (invite) => created = invite),
+      );
+      // 分享所需寫入已確認，不讓其他同步延長產生碼的等待時間。
+      unawaited(_trySync());
+      return result;
+    } on TripException catch (error) {
+      final invite = created;
+      if (invite != null) {
+        await local.deleteInvite(invite.code);
+        await local.removeOp(
+          SyncOp(
+            type: SyncOpType.upsertInvite,
+            tripId: tripId,
+            entityId: invite.code,
+          ),
+        );
+        if (error is! ServerWriteException) throw ServerWriteException();
+      }
+      rethrow;
+    } finally {
+      deadline.dispose();
+    }
+  }
+
+  Future<InviteRecord> _issueInviteCode(
+    String tripId,
+    _WriteDeadline deadline,
+    void Function(InviteRecord) onCreated,
+  ) async {
+    await deadline.wait(connectivity.refresh);
     final account = _account();
-    final trip = await getTrip(tripId);
+    final trip = await deadline.wait(() => getTrip(tripId));
     var membershipConfirmed = false;
     if (connectivity.isOnline) {
       try {
-        final members = await remote
-            .fetchMembers(tripId)
-            .timeout(
-              serverWriteTimeout,
-              onTimeout: () => throw ServerWriteException(),
-            );
+        final members = await deadline.wait(() => remote.fetchMembers(tripId));
         membershipConfirmed = members.any(
           (member) => member.userId == account.id,
         );
@@ -538,7 +606,7 @@ class OfflineTripRepository implements TripRepository {
     final now = await _stamp();
     final deviceNow = await clock.now();
     final invite = _issued(
-      code: await _freshCode(),
+      code: await _freshCode(deadline: deadline),
       tripId: trip.id,
       tripTitle: trip.title,
       createdBy: account.id,
@@ -546,7 +614,10 @@ class OfflineTripRepository implements TripRepository {
       createdAt: now,
       expiresAt: deviceNow.toUtc().add(TripPolicy.inviteLifetime),
     );
+    deadline.check();
+    onCreated(invite);
     await local.saveInvite(invite);
+    deadline.check();
     final inviteOp = SyncOp(
       type: SyncOpType.upsertInvite,
       tripId: trip.id,
@@ -554,39 +625,29 @@ class OfflineTripRepository implements TripRepository {
     );
     await local.enqueue(inviteOp);
     if (connectivity.isOnline) {
-      try {
-        // A trip created offline must exist with its creator membership before
-        // the server can accept a code. Do not send unrelated queued edits.
-        if (!membershipConfirmed) {
-          final publishedTrip = await remote
-              .fetchTrip(tripId)
-              .timeout(
-                serverWriteTimeout,
-                onTimeout: () => throw ServerWriteException(),
-              );
-          if (publishedTrip == null) {
-            await _pushNow([
-              SyncOp(type: SyncOpType.upsertTrip, tripId: tripId),
-            ]);
-          }
+      // A trip created offline must exist with its creator membership before
+      // the server can accept a code. Do not send unrelated queued edits.
+      if (!membershipConfirmed) {
+        final publishedTrip = await deadline.wait(
+          () => remote.fetchTrip(tripId),
+        );
+        if (publishedTrip == null) {
           await _pushNow([
-            SyncOp(
-              type: SyncOpType.upsertMember,
-              tripId: tripId,
-              entityId: account.id,
-            ),
-          ]);
+            SyncOp(type: SyncOpType.upsertTrip, tripId: tripId),
+          ], deadline: deadline);
         }
-        // 只送這次的邀請碼。佇列裡其他還沒送出的變更交給 _trySync，
-        // 不讓一筆一直被拒的舊變更擋住發碼。
-        await _pushNow([inviteOp]);
-      } on TripException {
-        await local.deleteInvite(invite.code);
-        await local.removeOp(inviteOp);
-        throw ServerWriteException();
+        await _pushNow([
+          SyncOp(
+            type: SyncOpType.upsertMember,
+            tripId: tripId,
+            entityId: account.id,
+          ),
+        ], deadline: deadline);
       }
+      // 只送這次的邀請碼。佇列裡其他還沒送出的變更交給 _trySync，
+      // 不讓一筆一直被拒的舊變更擋住發碼。
+      await _pushNow([inviteOp], deadline: deadline);
     }
-    await _trySync();
     return (await local.readInvite(invite.code)) ?? invite;
   }
 
@@ -638,6 +699,16 @@ class OfflineTripRepository implements TripRepository {
   @override
   Future<List<InviteRecord>> readCachedInvites(String tripId) =>
       local.readInvites(tripId);
+
+  @override
+  Future<void> refreshPendingInvites(String tripId) async {
+    if (!connectivity.isOnline || await local.isTripDiscarded(tripId)) return;
+    final known = await local.readInvites(tripId);
+    await Future.wait([
+      for (final invite in known)
+        if (!invite.serverConfirmed) _confirmKnownInvite(invite),
+    ]);
+  }
 
   @override
   Future<({List<InviteRecord> invites, bool failed})> revalidateInvites(
@@ -791,16 +862,21 @@ class OfflineTripRepository implements TripRepository {
     }
   }
 
+  Future<void>? _syncInFlight;
+
   @override
-  Future<void> sync() async {
+  Future<void> sync() => _syncInFlight ??= _sync().whenComplete(() {
+    _syncInFlight = null;
+  });
+
+  Future<void> _sync() async {
     await connectivity.refresh();
     if (!connectivity.isOnline) return;
     final queue = await local.readQueue();
     for (final op in queue) {
       // 行程改由 _mergeItinerary 比較校正後的儲存時間，避免先蓋掉另一台手機的版本。
       if (op.type == SyncOpType.upsertItinerary) continue;
-      await _push(op);
-      await local.removeOp(op);
+      await _pushNow([op], creating: false);
     }
     await _pull();
     for (final op in await local.readQueue()) {
@@ -813,14 +889,41 @@ class OfflineTripRepository implements TripRepository {
   }
 
   /// 立刻送出 [ops]，依序等伺服器確認。逾時視為寫入失敗。
-  Future<void> _pushNow(List<SyncOp> ops) async {
-    for (final op in ops) {
-      try {
-        await _push(op).timeout(serverWriteTimeout);
-      } on TimeoutException {
-        throw ServerWriteException();
-      }
-      await local.removeOp(op);
+  Future<void> _pushNow(
+    List<SyncOp> ops, {
+    bool creating = true,
+    _WriteDeadline? deadline,
+  }) async {
+    if (deadline != null) {
+      await deadline.wait(() async {
+        for (final op in ops) {
+          deadline.check();
+          await _push(op, isActive: () => !deadline.expired);
+          deadline.check();
+          await local.removeOp(op);
+        }
+      });
+      return;
+    }
+    var expired = false;
+    try {
+      await (() async {
+        for (final op in ops) {
+          if (expired) return;
+          await _push(op, isActive: () => !expired);
+          if (expired) return;
+          await local.removeOp(op);
+        }
+      })().timeout(
+        serverWriteTimeout,
+        onTimeout: () {
+          expired = true;
+          throw TimeoutException('伺服器寫入逾時');
+        },
+      );
+    } on TimeoutException {
+      if (creating) throw ServerWriteException(AppStrings.serverWriteTimedOut);
+      throw TripException(AppStrings.syncTimedOut);
     }
   }
 
@@ -853,7 +956,7 @@ class OfflineTripRepository implements TripRepository {
     );
   }
 
-  Future<void> _push(SyncOp op) async {
+  Future<void> _push(SyncOp op, {bool Function()? isActive}) async {
     switch (op.type) {
       case SyncOpType.upsertTrip:
         final trip = await local.readTrip(op.tripId);
@@ -877,7 +980,9 @@ class OfflineTripRepository implements TripRepository {
         final code = op.entityId ?? trip?.inviteCode;
         if (code != null) {
           final invite = await local.readInvite(code);
-          if (invite != null) await _publishInvite(invite);
+          if (invite != null) {
+            await _publishInvite(invite, isActive: isActive);
+          }
         }
       case SyncOpType.upsertItinerary:
         final day = await local.readItineraryDay(op.tripId, op.entityId ?? '');
@@ -904,6 +1009,7 @@ class OfflineTripRepository implements TripRepository {
     final userId = _account().id;
     final remoteTrips = await remote.fetchTripsForUser(userId);
     for (final remoteTrip in remoteTrips) {
+      if (await local.isTripDiscarded(remoteTrip.id)) continue;
       final cached = await local.readTrip(remoteTrip.id);
       if (cached != null && cached.updatedAt.isAfter(remoteTrip.updatedAt)) {
         await remote.upsertTrip(cached);
@@ -979,13 +1085,19 @@ class OfflineTripRepository implements TripRepository {
     );
   }
 
-  Future<String> _freshCode() async {
+  Future<String> _freshCode({_WriteDeadline? deadline}) async {
     for (var guard = 0; guard < 5; guard++) {
       final code = ids.inviteCode().trim().toUpperCase();
+      if (await local.isInviteDiscarded(code)) continue;
       if (await local.readInvite(code) != null) continue;
       if (!connectivity.isOnline) return code;
       try {
-        if (await remote.fetchInvite(code) == null) return code;
+        final known = deadline == null
+            ? await remote.fetchInvite(code)
+            : await deadline.wait(() => remote.fetchInvite(code));
+        if (known == null) return code;
+      } on ServerWriteException {
+        rethrow;
       } on TripException {
         return code;
       }
@@ -994,8 +1106,10 @@ class OfflineTripRepository implements TripRepository {
   }
 
   Future<void> _cacheInvites(String tripId) async {
+    if (await local.isTripDiscarded(tripId)) return;
     try {
       for (final invite in await remote.fetchInvites(tripId)) {
+        if (await local.isInviteDiscarded(invite.code)) continue;
         await local.saveInvite(invite.withServerConfirmation(true));
       }
     } on TripException {
@@ -1011,6 +1125,10 @@ class OfflineTripRepository implements TripRepository {
   }
 
   Future<void> _confirmKnownInvite(InviteRecord cached) async {
+    if (await local.isInviteDiscarded(cached.code) ||
+        await local.isTripDiscarded(cached.tripId)) {
+      return;
+    }
     try {
       final confirmed = await remote
           .fetchInvite(cached.code)
@@ -1025,7 +1143,10 @@ class OfflineTripRepository implements TripRepository {
     }
   }
 
-  Future<void> _publishInvite(InviteRecord invite) async {
+  Future<void> _publishInvite(
+    InviteRecord invite, {
+    bool Function()? isActive,
+  }) async {
     // A previous write may have succeeded before a timeout. Read first so a
     // retry never recreates a published code or extends its lifetime.
     var confirmed = await remote.fetchInvite(invite.code);
@@ -1051,6 +1172,7 @@ class OfflineTripRepository implements TripRepository {
           expiresAt: deviceNow.add(TripPolicy.inviteLifetime),
         );
       }
+      if (isActive?.call() == false) return;
       await remote.upsertInvite(pending);
       confirmed = await remote.fetchInvite(invite.code);
     }
@@ -1059,6 +1181,11 @@ class OfflineTripRepository implements TripRepository {
         confirmed.createdBy != invite.createdBy ||
         confirmed.issuerRole != invite.issuerRole) {
       throw ServerWriteException();
+    }
+    // Future.timeout 不會取消 Firestore 寫入，已丟棄的本機碼不能復活。
+    if (isActive?.call() == false ||
+        await local.readInvite(invite.code) == null) {
+      return;
     }
     await local.saveInvite(confirmed.withServerConfirmation(true));
   }

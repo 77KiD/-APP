@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -33,6 +35,20 @@ class DeviceTimeZoneSource implements TimeZoneSource {
 }
 
 class PluginConnectivityProbe extends ConnectivityProbe {
+  PluginConnectivityProbe() {
+    _subscription = Connectivity().onConnectivityChanged.listen((results) {
+      isOnline = results.any((result) => result != ConnectivityResult.none);
+    });
+  }
+
+  late final StreamSubscription<List<ConnectivityResult>> _subscription;
+
+  @override
+  void dispose() {
+    unawaited(_subscription.cancel());
+    super.dispose();
+  }
+
   @override
   Future<void> refresh() async {
     try {
